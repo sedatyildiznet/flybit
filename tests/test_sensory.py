@@ -65,6 +65,35 @@ class SensoryDynamicsTest(unittest.TestCase):
         self.assertAlmostEqual(stationary.looming_rate, 0.0)
         self.assertIsNone(stationary.time_to_collision)
 
+    def test_dark_expansion_produces_retinal_loom_without_semantics(self):
+        model = DesktopMotionModel()
+        first = np.full(128, 0.9, dtype=np.float32)
+        second = first.copy()
+        first[28:32] = 0.1
+        second[24:36] = 0.1
+
+        model.update(
+            body_x=0.0,
+            body_y=0.0,
+            heading=0.0,
+            cursor_x=500.0,
+            cursor_y=0.0,
+            luminance=first,
+            timestamp=1.0,
+        )
+        expanded = model.update(
+            body_x=0.0,
+            body_y=0.0,
+            heading=0.0,
+            cursor_x=500.0,
+            cursor_y=0.0,
+            luminance=second,
+            timestamp=1.020,
+        )
+
+        self.assertGreater(expanded.retinal_loom_left, 0.0)
+        self.assertAlmostEqual(expanded.retinal_loom_right, 0.0)
+
     def test_panorama_shift_is_visible_as_optic_flow(self):
         model = DesktopMotionModel()
         x = np.linspace(0.0, 2.0 * np.pi, 128, endpoint=False)
