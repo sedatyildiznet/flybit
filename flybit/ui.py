@@ -40,6 +40,8 @@ from PySide6.QtWidgets import (
 
 from .care import CareModel
 from .icon import flybit_icon
+from .life import LifeModel, LifeSnapshot
+from .perception import DesktopSemanticScanner, PerceivedObject
 from .motion import (
     FlyBodyState,
     FlyKinematics,
@@ -64,6 +66,9 @@ class BrainWorker(QObject):
         self._scene_azimuth = None
         self._timer: QTimer | None = None
         self._core: FlybitNeuralCore | None = None
+        self._hunger_drive = 0.0
+        self._vitality = 1.0
+        self._activity_trait = 0.5
 
     @Slot()
     def start(self) -> None:
@@ -118,11 +123,27 @@ class BrainWorker(QObject):
         self._scene_luminance = luminance
         self._scene_azimuth = azimuth
 
+    @Slot(float, float, float)
+    def set_homeostasis(
+        self,
+        hunger_drive: float,
+        vitality: float,
+        activity_trait: float,
+    ) -> None:
+        self._hunger_drive = float(hunger_drive)
+        self._vitality = float(vitality)
+        self._activity_trait = float(activity_trait)
+
     @Slot()
     def _step(self) -> None:
         if self._core is None:
             return
         try:
+            self._core.set_homeostasis(
+                self._hunger_drive,
+                self._vitality,
+                self._activity_trait,
+            )
             if (
                 self._scene_luminance is not None
                 and self._scene_azimuth is not None
@@ -740,6 +761,80 @@ class ControlPanel(QWidget):
         events_layout.addWidget(self.log, 1)
         self.tabs.addTab(events_tab, "Events")
 
+        # Perception
+        perception_tab = QWidget()
+        perception_layout = QVBoxLayout(perception_tab)
+        perception_layout.setContentsMargins(8, 12, 8, 8)
+        perception_title = QLabel("SEMANTIC DESKTOP PERCEPTION")
+        perception_title.setObjectName("section")
+        perception_layout.addWidget(perception_title)
+        self.perception_summary = QLabel(
+            "Scanning cursor, windows, applications and native buttons…"
+        )
+        self.perception_summary.setWordWrap(True)
+        self.perception_summary.setObjectName("muted")
+        perception_layout.addWidget(self.perception_summary)
+        self.perception_log = QPlainTextEdit()
+        self.perception_log.setReadOnly(True)
+        self.perception_log.setObjectName("log")
+        perception_layout.addWidget(self.perception_log, 1)
+        perception_note = QLabel(
+            "Semantic labels are sensory context only. Chrome/button/window/"
+            "cursor recognition never maps directly to a movement command."
+        )
+        perception_note.setWordWrap(True)
+        perception_note.setObjectName("foot")
+        perception_layout.addWidget(perception_note)
+        self.tabs.addTab(perception_tab, "Perception")
+
+        # Life
+        life_tab = QWidget()
+        life_layout = QVBoxLayout(life_tab)
+        life_layout.setContentsMargins(8, 12, 8, 8)
+        life_layout.setSpacing(12)
+        life_title = QLabel("LIFE HISTORY & PHENOTYPE")
+        life_title.setObjectName("section")
+        life_layout.addWidget(life_title)
+        self.life_age = QLabel("Age · —")
+        self.life_span = QLabel("Expected lifespan · —")
+        self.life_sex = QLabel("Sex · Male")
+        for widget in (self.life_age, self.life_span, self.life_sex):
+            widget.setObjectName("muted")
+            life_layout.addWidget(widget)
+        self.life_progress = QProgressBar()
+        self.life_progress.setRange(0, 1000)
+        self.life_progress.setFormat("Life progress · %p%")
+        life_layout.addWidget(self.life_progress)
+        self.life_vitality = QProgressBar()
+        self.life_vitality.setRange(0, 100)
+        self.life_vitality.setFormat("Vitality · %p%")
+        life_layout.addWidget(self.life_vitality)
+        self.life_energy = QProgressBar()
+        self.life_energy.setRange(0, 100)
+        self.life_energy.setFormat("Metabolic energy · %p%")
+        life_layout.addWidget(self.life_energy)
+        self.life_traits = QLabel("Activity — · Boldness — · Curiosity —")
+        self.life_traits.setWordWrap(True)
+        self.life_traits.setObjectName("muted")
+        life_layout.addWidget(self.life_traits)
+        self.biomechanics = QLabel(
+            "Speed — · acceleration — · gait — · wingbeat —"
+        )
+        self.biomechanics.setWordWrap(True)
+        self.biomechanics.setObjectName("muted")
+        life_layout.addWidget(self.biomechanics)
+        life_note = QLabel(
+            "This is a persistent digital organism with a wall-clock birth, "
+            "finite modeled lifespan, metabolism and individual phenotype. "
+            "The MaleCNS connectome is biological data; the full organism is "
+            "still a computational life model rather than a literal animal."
+        )
+        life_note.setWordWrap(True)
+        life_note.setObjectName("foot")
+        life_layout.addWidget(life_note)
+        life_layout.addStretch()
+        self.tabs.addTab(life_tab, "Life")
+
         self.setStyleSheet(
             """
             QWidget {
@@ -937,6 +1032,59 @@ class ControlPanel(QWidget):
             else "Place sugar…"
         )
 
+    def update_perception(
+        self,
+        objects: tuple[PerceivedObject, ...],
+    ) -> None:
+        counts: dict[str, int] = {}
+        for obj in objects:
+            counts[obj.kind] = counts.get(obj.kind, 0) + 1
+        self.perception_summary.setText(
+            " · ".join(
+                f"{kind} {count}"
+                for kind, count in sorted(counts.items())
+            ) or "No semantic objects detected"
+        )
+        lines = []
+        for obj in objects:
+            lines.append(
+                f"{obj.kind.upper():11s}  {obj.label[:42]:42s}  "
+                f"{obj.confidence * 100:5.1f}%"
+            )
+        self.perception_log.setPlainText("\n".join(lines))
+
+    def update_life(
+        self,
+        life: LifeSnapshot,
+        biomechanics,
+    ) -> None:
+        if life.age_days >= 1.0:
+            age_text = f"{life.age_days:.2f} days"
+        else:
+            age_text = f"{life.age_seconds / 3600.0:.2f} hours"
+        self.life_age.setText(f"Age · {age_text}")
+        self.life_span.setText(
+            f"Expected lifespan · {life.lifespan_days:.1f} days · "
+            f"remaining {life.remaining_days:.1f} days"
+        )
+        self.life_sex.setText(
+            f"Sex · {life.sex} · {'ALIVE' if life.alive else 'LIFE ENDED'}"
+        )
+        self.life_progress.setValue(int(life.life_progress * 1000))
+        self.life_vitality.setValue(int(life.vitality * 100))
+        self.life_energy.setValue(int(life.energy * 100))
+        self.life_traits.setText(
+            f"Activity {life.activity:.2f} · Boldness {life.boldness:.2f} · "
+            f"Curiosity {life.curiosity:.2f}"
+        )
+        self.biomechanics.setText(
+            f"Speed {biomechanics.speed:.1f}px/s · "
+            f"acceleration {biomechanics.acceleration:.1f}px/s² · "
+            f"turn {biomechanics.turn_rate:.2f}rad/s · "
+            f"gait {biomechanics.gait_phase:.2f} · "
+            f"wingbeat {biomechanics.wingbeat_hz:.0f}Hz"
+        )
+
     def append_log(self, message: str) -> None:
         stamp = time.strftime("%H:%M:%S")
         self._logs.append(f"{stamp}  {message}")
@@ -957,12 +1105,16 @@ class FlybitWindow(QObject):
     """Application controller; only the organism is visible by default."""
 
     scene_changed = Signal(object, object)
+    homeostasis_changed = Signal(float, float, float)
 
     def __init__(self) -> None:
         super().__init__()
         self.app = QApplication.instance()
         self.state = load_state()
         self.care = CareModel(self.state)
+        self.life = LifeModel(self.state)
+        self.semantic_scanner = DesktopSemanticScanner()
+        self.nearby_objects: tuple[PerceivedObject, ...] = ()
 
         self.fly = FlyOverlay()
         self.fly.setWindowIcon(flybit_icon())
@@ -1020,6 +1172,7 @@ class FlybitWindow(QObject):
         self._worker.moveToThread(self._brain_thread)
         self._brain_thread.started.connect(self._worker.start)
         self.scene_changed.connect(self._worker.set_scene)
+        self.homeostasis_changed.connect(self._worker.set_homeostasis)
         self._worker.ready.connect(self._on_ready)
         self._worker.layout.connect(self.panel.brain_map.set_layout)
         self._worker.snapshot.connect(self._on_snapshot)
@@ -1051,6 +1204,11 @@ class FlybitWindow(QObject):
         self._care_timer.setInterval(1000)
         self._care_timer.timeout.connect(self._refresh_care)
         self._care_timer.start()
+
+        self._perception_timer = QTimer(self)
+        self._perception_timer.setInterval(500)
+        self._perception_timer.timeout.connect(self._refresh_perception)
+        self._perception_timer.start()
 
         self._save_timer = QTimer(self)
         self._save_timer.setInterval(2000)
@@ -1099,12 +1257,29 @@ class FlybitWindow(QObject):
     @Slot()
     def _tick(self) -> None:
         self.care.tick(0.020)
+        life = self.life.snapshot()
+        motor_load = self.kinematics.biomechanics().locomotor_load
+        self.life.tick(
+            0.020,
+            motor_load=motor_load,
+            hunger=self.state.hunger,
+        )
+        life = self.life.snapshot()
+        self.homeostasis_changed.emit(
+            self.care.homeostatic_drive,
+            life.vitality,
+            life.activity,
+        )
         bounds = self._desktop_bounds()
+        physiology_gain = life.vitality * (0.78 + 0.30 * life.activity)
+        if not life.alive:
+            physiology_gain = 0.0
         events = self.kinematics.update(
-            self.latest_motor,
+            self.latest_motor if life.alive else MotorActivity(),
             self.surfaces,
             bounds,
             dt=0.020,
+            physiology_gain=physiology_gain,
         )
 
         for event in events:
@@ -1130,6 +1305,7 @@ class FlybitWindow(QObject):
         self._position_overlay()
 
         if self.care.contact(body.x, body.y):
+            self.life.feed()
             self.food_overlay.hide()
             self.panel.append_log(
                 "sugar contact → consumed · nutrition state updated"
@@ -1180,6 +1356,25 @@ class FlybitWindow(QObject):
             last_feed=self.state.last_feed_at,
             food_active=self.care.food is not None,
         )
+        self.panel.update_life(
+            self.life.snapshot(),
+            self.kinematics.biomechanics(),
+        )
+
+    @Slot()
+    def _refresh_perception(self) -> None:
+        cursor = QCursor.pos()
+        objects = self.semantic_scanner.scan(
+            (float(cursor.x()), float(cursor.y()))
+        )
+        body = self.kinematics.state
+        self.nearby_objects = self.semantic_scanner.nearest(
+            objects,
+            body.x,
+            body.y,
+            limit=12,
+        )
+        self.panel.update_perception(self.nearby_objects)
 
     @Slot(object)
     def _on_ready(self, info: dict) -> None:
@@ -1310,6 +1505,7 @@ class FlybitWindow(QObject):
         self._physics_timer.stop()
         self._vision_timer.stop()
         self._care_timer.stop()
+        self._perception_timer.stop()
         self._save_timer.stop()
         self.food_overlay.hide()
         self.food_placement.hide()
