@@ -95,6 +95,29 @@ class GradedVisualTest(unittest.TestCase):
 
         self.assertGreater(float(brain.v[1, 0]), 0.0)
 
+    def test_neural_core_accepts_interpolated_panorama(self):
+        brain = self.make_brain()
+        source_azimuth = np.array(
+            [-1.0, 0.0, 1.0],
+            np.float32,
+        )
+        luminance = np.array(
+            [0.9, 0.1, 0.9],
+            np.float32,
+        )
+
+        receptor_luminance = np.interp(
+            brain.azimuth,
+            source_azimuth,
+            luminance,
+        ).astype(np.float32)
+        drive = brain.step(
+            eye_drive=brain.xp.asarray(
+                brain.azimuth * 0.0 + receptor_luminance
+            )
+        )
+        self.assertIsNotNone(drive)
+
     def test_raw_luminance_path_matches_photoreceptor_shape(self):
         eyes = Eyes(np.array([-0.5, 0.5], np.float32))
         drive = eyes.contrast_from_luminance(
