@@ -61,6 +61,29 @@ class Eyes:
         self.previous = lum
         return np.clip(0.45 * lum + 1.6 * change, 0, 1)
 
+    def contrast_from_luminance(
+        self,
+        luminance: np.ndarray,
+        *,
+        dt: float = 0.020,
+        adaptation_tau: float = 0.250,
+    ) -> np.ndarray:
+        """Signed adapting contrast from raw photoreceptor luminance.
+
+        luminance must already be sampled/interpolated onto self.azimuth.
+        """
+        lum = np.asarray(luminance, dtype=np.float32)
+        if lum.shape != self.azimuth.shape:
+            raise ValueError(
+                f"expected luminance shape {self.azimuth.shape}, got {lum.shape}"
+            )
+
+        return self.contrast_from_luminance(
+            lum,
+            dt=dt,
+            adaptation_tau=adaptation_tau,
+        )
+
     def contrast_drive(
         self,
         blobs: list[Blob],
