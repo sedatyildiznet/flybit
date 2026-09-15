@@ -175,9 +175,14 @@ class MotionBridgeTest(unittest.TestCase):
             3.141592653589793,
             delta=0.05,
         )
+        wrapped_delta = (
+            body.heading
+            - first_heading
+            + 3.141592653589793
+        ) % (2.0 * 3.141592653589793) - 3.141592653589793
         self.assertAlmostEqual(
-            body.heading,
-            first_heading,
+            wrapped_delta,
+            0.0,
             delta=0.05,
         )
 
