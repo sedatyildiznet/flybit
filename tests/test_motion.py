@@ -68,6 +68,54 @@ class MotionBridgeTest(unittest.TestCase):
             )
         )
 
+    def test_dng02_extends_existing_flight(self):
+        body = FlyBodyState(
+            x=220.0,
+            y=220.0,
+            heading=0.0,
+            airborne=True,
+            flight_energy=0.05,
+        )
+        model = FlyKinematics(body)
+
+        for _ in range(20):
+            model.update(
+                MotorActivity(
+                    flight_left=1.0,
+                    flight_right=1.0,
+                ),
+                [],
+                (0.0, 0.0, 800.0, 600.0),
+                dt=0.020,
+            )
+
+        self.assertTrue(body.airborne)
+        self.assertGreater(body.x, 220.0)
+        self.assertGreater(body.flight_energy, 0.05)
+
+    def test_corner_can_leave_when_neural_steering_turns_inward(self):
+        body = FlyBodyState(
+            x=12.0,
+            y=9.0,
+            heading=-2.4,
+        )
+        model = FlyKinematics(body)
+
+        for _ in range(240):
+            model.update(
+                MotorActivity(
+                    forward_left=0.65,
+                    forward_right=0.65,
+                    steer_right=0.8,
+                ),
+                [],
+                (0.0, 0.0, 800.0, 600.0),
+                dt=0.020,
+            )
+
+        self.assertGreater(body.x, 20.0)
+        self.assertGreater(body.y, 15.0)
+
     def test_no_gravity_drift_without_motor_output(self):
         body = FlyBodyState(
             x=320.0,
