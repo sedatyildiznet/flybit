@@ -1153,7 +1153,8 @@ class ControlPanel(QWidget):
         self.neural_detail.setText(
             f"retina rms {snap.photoreceptor_rms:.3f}   "
             f"lamina rms {snap.lamina_rms:.3f}   "
-            f"visual projection {snap.visual_projection_spikes:,} spikes"
+            f"visual projection {snap.visual_projection_spikes:,} spikes   "
+            f"LPLC2 loom {snap.looming_spikes:,}"
         )
         self.brain_map.set_active(snap.active_brain_points)
         self.forward.setValue(min(100, int(snap.motor.forward * 100)))
