@@ -49,8 +49,9 @@ class FlybitNeuralCore:
         # used only when the MaleCNS annotation actually contains the type.
         "dopa_L": (["DopaMeander"], "L"),
         "dopa_R": (["DopaMeander"], "R"),
-        "flight_L": (["DNg02"], "L"),
-        "flight_R": (["DNg02"], "R"),
+        # MaleCNS splits DNg02 into subtypes such as DNg02_a/c/g.
+        "flight_L": (["DNg02*"], "L"),
+        "flight_R": (["DNg02*"], "R"),
     }
 
     def __init__(
@@ -91,7 +92,7 @@ class FlybitNeuralCore:
         for name, (types, side) in self.MOTOR_FALLBACKS.items():
             group = self.brain.groups.get(name)
             if group is None or len(group) == 0:
-                group = self.brain.cells(
+                group = self._resolve_cells(
                     types,
                     side=side,
                 )
@@ -105,6 +106,55 @@ class FlybitNeuralCore:
             name: 0.0
             for name in self.motor_groups
         }
+
+    def _resolve_cells(
+        self,
+        types: list[str],
+        *,
+        side: str | None = None,
+    ) -> np.ndarray:
+        """Resolve exact MaleCNS types and optional prefix patterns.
+
+        A trailing "*" means "all flywireType subtypes with this prefix".
+        This matters for descending populations such as DNg02, represented in
+        MaleCNS as DNg02_a, DNg02_c, DNg02_g, ... rather than one exact type.
+        """
+        exact = [
+            value
+            for value in types
+            if not value.endswith("*")
+        ]
+        prefixes = [
+            value[:-1]
+            for value in types
+            if value.endswith("*")
+        ]
+
+        mask = np.zeros(self.brain.n, dtype=np.bool_)
+        if exact:
+            mask |= np.isin(
+                self.brain.cell_type,
+                exact,
+            )
+
+        if prefixes:
+            names = np.asarray(
+                self.brain.cell_type,
+                dtype=str,
+            )
+            for prefix in prefixes:
+                mask |= np.char.startswith(
+                    names,
+                    prefix,
+                )
+
+        if side:
+            mask &= np.asarray(
+                self.brain.side,
+                dtype=str,
+            ) == side
+
+        return np.flatnonzero(mask).astype(np.int64)
 
     @property
     def device(self) -> str:
