@@ -1,8 +1,9 @@
-"""Kinematic body bridge driven only by MaleCNS motor read-outs.
+"""2-D desktop body bridge driven only by MaleCNS motor read-outs.
 
-The decoder maps identified descending-neuron activity onto simple 2-D forces.
-It does not inspect the mouse, windows or application state when choosing an
-action. Those belong to the sensory/world side of the closed loop.
+The Windows desktop is treated as a flat locomotion plane, not a vertical world.
+There is no downward gravity, falling or edge-bounce rotation. Identified
+descending neurons provide locomotor/steering/escape drive; the body decoder
+turns those outputs into planar velocity.
 """
 from __future__ import annotations
 
@@ -48,11 +49,8 @@ class FlyBodyState:
     vx: float = 0.0
     vy: float = 0.0
     angular_velocity: float = 0.0
-    landed_surface: int | None = None
-
-    @property
-    def airborne(self) -> bool:
-        return self.landed_surface is None
+    airborne: bool = False
+    flight_energy: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -62,16 +60,16 @@ class MotionEvent:
 
 
 class FlyKinematics:
-    """Small body model for the Windows overlay.
+    """Planar desktop body model.
 
-    This is intentionally not a behaviour state machine. Identified descending
-    neurons provide the drive:
+    Neural mapping:
       DNg100 -> forward locomotor drive
-      DNa02  -> left/right steering differential
-      DNp01  -> escape/take-off impulse
+      DNa02  -> steering differential
+      DNp01  -> escape/flight burst
       MDN    -> backward locomotor drive
 
-    Gravity, drag and window collision are environment physics.
+    No cursor/window state is read here. The entire desktop is one flat plane.
+    Window contents are visual sensory input, not separate gravity surfaces.
     """
 
     BODY_HALF_HEIGHT = 9.0
@@ -83,9 +81,15 @@ class FlyKinematics:
         self._backward = 0.0
         self._steer = 0.0
         self._escape = 0.0
+        self._escape_prev = 0.0
 
     @staticmethod
-    def _lowpass(current: float, target: float, dt: float, tau: float) -> float:
+    def _lowpass(
+        current: float,
+        target: float,
+        dt: float,
+        tau: float,
+    ) -> float:
         alpha = 1.0 - math.exp(-dt / max(tau, 1e-6))
         return current + (target - current) * alpha
 
@@ -100,6 +104,7 @@ class FlyKinematics:
         bounds: tuple[float, float, float, float],
         dt: float = 0.020,
     ) -> list[MotionEvent]:
+        del surfaces  # retained only for API compatibility
         events: list[MotionEvent] = []
         s = self.state
 
@@ -119,7 +124,7 @@ class FlyKinematics:
             self._steer,
             motor.steering,
             dt,
-            0.08,
+            0.09,
         )
         self._escape = self._lowpass(
             self._escape,
@@ -128,140 +133,121 @@ class FlyKinematics:
             0.045,
         )
 
-        # DNa02 differential changes orientation. This mapping is a decoder,
-        # not an environmental rule.
-        s.angular_velocity += self._steer * 8.0 * dt
-        s.angular_velocity *= math.exp(-4.0 * dt)
+        # Steering is a yaw-only decoder on the screen plane. It cannot roll or
+        # pitch the rendered body, so the fly no longer appears to somersault.
+        target_turn_rate = max(
+            -2.8,
+            min(2.8, self._steer * 5.0),
+        )
+        s.angular_velocity = self._lowpass(
+            s.angular_velocity,
+            target_turn_rate,
+            dt,
+            0.07,
+        )
         s.heading = self._wrap_angle(
-            s.heading + s.angular_velocity
+            s.heading + s.angular_velocity * dt
         )
 
-        surface_by_id = {
-            surface.id: surface
-            for surface in surfaces
-        }
-
-        if s.landed_surface is not None:
-            support = surface_by_id.get(s.landed_surface)
-            if (
-                support is None
-                or s.x < support.left - self.BODY_HALF_WIDTH
-                or s.x > support.right + self.BODY_HALF_WIDTH
-            ):
-                s.landed_surface = None
-                events.append(MotionEvent("fall", "support lost"))
-            else:
-                s.y = support.top - self.BODY_HALF_HEIGHT
-                direction = 1.0 if math.cos(s.heading) >= 0.0 else -1.0
-                walk_drive = self._forward - self._backward
-                target_vx = direction * walk_drive * 155.0
-                s.vx = self._lowpass(
-                    s.vx,
-                    target_vx,
-                    dt,
-                    0.08,
+        # A rising DNp01 response starts a brief planar flight burst. The body
+        # remains on the desktop plane: "airborne" controls wing rendering and
+        # motor scale only, not a fake vertical gravity axis.
+        if (
+            self._escape > 0.06
+            and self._escape_prev <= 0.06
+        ):
+            s.airborne = True
+            s.flight_energy = max(
+                s.flight_energy,
+                0.55 + self._escape * 0.75,
+            )
+            events.append(
+                MotionEvent(
+                    "takeoff",
+                    "DNp01 escape output",
                 )
-                s.vy = 0.0
-                s.x += s.vx * dt
+            )
 
-                # DNp01 is the only signal that directly creates a take-off
-                # impulse. Cursor distance is never consulted here.
-                if self._escape > 0.06:
-                    s.landed_surface = None
-                    s.vy = -125.0 - 280.0 * self._escape
-                    s.vx += math.cos(s.heading) * (
-                        220.0 * self._escape
-                    )
-                    events.append(
-                        MotionEvent(
-                            "takeoff",
-                            "DNp01 escape output",
-                        )
-                    )
-                elif (
-                    s.x < support.left
-                    or s.x > support.right
-                ):
-                    s.landed_surface = None
-                    events.append(
-                        MotionEvent(
-                            "fall",
-                            "walked beyond window edge",
-                        )
-                    )
+        self._escape_prev = self._escape
 
-        if s.landed_surface is None:
-            previous_y = s.y
+        if s.flight_energy > 0.0:
+            s.flight_energy = max(
+                0.0,
+                s.flight_energy - dt,
+            )
+        elif (
+            s.airborne
+            and self._escape < 0.025
+        ):
+            s.airborne = False
+            events.append(
+                MotionEvent(
+                    "land",
+                    "desktop plane",
+                )
+            )
 
-            locomotor = self._forward - self._backward
-            thrust = locomotor * 185.0 + self._escape * 620.0
+        walk_drive = self._forward - self._backward
+        if s.airborne:
+            speed_target = (
+                walk_drive * 220.0
+                + self._escape * 760.0
+            )
+            response_tau = 0.055
+        else:
+            speed_target = walk_drive * 155.0
+            response_tau = 0.10
 
-            s.vx += math.cos(s.heading) * thrust * dt
-            s.vy += math.sin(s.heading) * thrust * dt
+        desired_vx = math.cos(s.heading) * speed_target
+        desired_vy = math.sin(s.heading) * speed_target
 
-            # Escape output also contributes lift, representing the fast
-            # take-off/flight command without looking at the stimulus source.
-            s.vy -= self._escape * 480.0 * dt
+        s.vx = self._lowpass(
+            s.vx,
+            desired_vx,
+            dt,
+            response_tau,
+        )
+        s.vy = self._lowpass(
+            s.vy,
+            desired_vy,
+            dt,
+            response_tau,
+        )
 
-            # Passive body physics.
-            s.vy += 145.0 * dt
-            drag = math.exp(-1.35 * dt)
-            s.vx *= drag
-            s.vy *= drag
+        # Passive planar drag prevents endless drifting after neural drive ends.
+        drag = math.exp(
+            -(2.2 if s.airborne else 4.0) * dt
+        )
+        s.vx *= drag
+        s.vy *= drag
 
-            s.x += s.vx * dt
-            s.y += s.vy * dt
-
-            if s.vy >= 0.0:
-                crossed = [
-                    surface
-                    for surface in surfaces
-                    if (
-                        surface.left - self.BODY_HALF_WIDTH
-                        <= s.x
-                        <= surface.right + self.BODY_HALF_WIDTH
-                        and previous_y + self.BODY_HALF_HEIGHT
-                        <= surface.top
-                        <= s.y + self.BODY_HALF_HEIGHT
-                    )
-                ]
-                if crossed:
-                    support = min(
-                        crossed,
-                        key=lambda surface: surface.top,
-                    )
-                    s.y = support.top - self.BODY_HALF_HEIGHT
-                    s.vx *= 0.35
-                    s.vy = 0.0
-                    s.landed_surface = support.id
-                    events.append(
-                        MotionEvent(
-                            "land",
-                            support.title or "window",
-                        )
-                    )
+        s.x += s.vx * dt
+        s.y += s.vy * dt
 
         left, top, right, bottom = bounds
+        min_x = left + self.BODY_HALF_WIDTH
+        max_x = right - self.BODY_HALF_WIDTH
+        min_y = top + self.BODY_HALF_HEIGHT
+        max_y = bottom - self.BODY_HALF_HEIGHT
 
-        # Desktop boundaries are physical containment, not behaviour.
-        if s.x < left + self.BODY_HALF_WIDTH:
-            s.x = left + self.BODY_HALF_WIDTH
-            s.vx = abs(s.vx) * 0.45
-            s.heading = self._wrap_angle(math.pi - s.heading)
-        elif s.x > right - self.BODY_HALF_WIDTH:
-            s.x = right - self.BODY_HALF_WIDTH
-            s.vx = -abs(s.vx) * 0.45
-            s.heading = self._wrap_angle(math.pi - s.heading)
+        # Screen edges are containment only. We remove the outward velocity
+        # component instead of reflecting heading, eliminating edge spin loops.
+        if s.x < min_x:
+            s.x = min_x
+            if s.vx < 0.0:
+                s.vx = 0.0
+        elif s.x > max_x:
+            s.x = max_x
+            if s.vx > 0.0:
+                s.vx = 0.0
 
-        if s.y < top + self.BODY_HALF_HEIGHT:
-            s.y = top + self.BODY_HALF_HEIGHT
-            s.vy = abs(s.vy) * 0.35
-        elif s.y > bottom - self.BODY_HALF_HEIGHT:
-            s.y = bottom - self.BODY_HALF_HEIGHT
-            s.vy = 0.0
-            # The desktop bottom acts as a fallback physical surface.
-            s.landed_surface = -1
-            if not any(event.kind == "land" for event in events):
-                events.append(MotionEvent("land", "desktop edge"))
+        if s.y < min_y:
+            s.y = min_y
+            if s.vy < 0.0:
+                s.vy = 0.0
+        elif s.y > max_y:
+            s.y = max_y
+            if s.vy > 0.0:
+                s.vy = 0.0
 
         return events
