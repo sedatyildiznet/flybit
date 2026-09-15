@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .arousal import ThreatArousalModel
 from .care import CareModel
 from .circadian import CircadianModel
 from .icon import flybit_icon
@@ -76,6 +77,7 @@ class BrainWorker(QObject):
         self._boldness_trait = 0.5
         self._curiosity_trait = 0.5
         self._rest_drive = 0.0
+        self._threat_arousal = 0.0
 
     @Slot()
     def start(self) -> None:
@@ -135,7 +137,7 @@ class BrainWorker(QObject):
         self._scene_azimuth = azimuth
         self._sensory_dynamics = dynamics
 
-    @Slot(float, float, float, float, float, float)
+    @Slot(float, float, float, float, float, float, float)
     def set_homeostasis(
         self,
         hunger_drive: float,
@@ -144,6 +146,7 @@ class BrainWorker(QObject):
         boldness_trait: float,
         curiosity_trait: float,
         rest_drive: float,
+        threat_arousal: float,
     ) -> None:
         self._hunger_drive = float(hunger_drive)
         self._vitality = float(vitality)
@@ -151,6 +154,7 @@ class BrainWorker(QObject):
         self._boldness_trait = float(boldness_trait)
         self._curiosity_trait = float(curiosity_trait)
         self._rest_drive = float(rest_drive)
+        self._threat_arousal = float(threat_arousal)
 
     @Slot()
     def persist(self) -> None:
@@ -169,6 +173,7 @@ class BrainWorker(QObject):
                 self._boldness_trait,
                 self._curiosity_trait,
                 self._rest_drive,
+                self._threat_arousal,
             )
             if self._sensory_dynamics is not None:
                 self._core.set_visual_motion(
@@ -948,6 +953,9 @@ class ControlPanel(QWidget):
         self.circadian_status.setWordWrap(True)
         self.circadian_status.setObjectName("muted")
         life_layout.addWidget(self.circadian_status)
+        self.arousal_status = QLabel("Threat arousal · —")
+        self.arousal_status.setObjectName("muted")
+        life_layout.addWidget(self.arousal_status)
         self.biomechanics = QLabel(
             "Speed — · acceleration — · gait — · wingbeat —"
         )
@@ -1208,6 +1216,7 @@ class ControlPanel(QWidget):
             f"TTC {ttc} · optic flow {dynamics.optic_flow:+.3f}rev/s · "
             f"loom L/R {dynamics.retinal_loom_left:.2f}/"
             f"{dynamics.retinal_loom_right:.2f} · "
+            f"habituation {dynamics.loom_habituation:.2f} · "
             f"near-field {dynamics.mechanosensory_disturbance:.2f} · "
             f"observer salience {dynamics.threat_salience:.2f}"
         )
@@ -1238,6 +1247,7 @@ class ControlPanel(QWidget):
         life: LifeSnapshot,
         biomechanics,
         circadian=None,
+        arousal=None,
     ) -> None:
         if life.age_days >= 1.0:
             age_text = f"{life.age_days:.2f} days"
@@ -1274,6 +1284,10 @@ class ControlPanel(QWidget):
                 f"rest drive {circadian.rest_drive:.2f} · "
                 f"ambient {circadian.ambient_luminance:.2f}"
             )
+        if arousal is not None:
+            self.arousal_status.setText(
+                f"Threat arousal · {arousal.threat_arousal:.2f}"
+            )
 
     def append_log(self, message: str) -> None:
         stamp = time.strftime("%H:%M:%S")
@@ -1295,7 +1309,9 @@ class FlybitWindow(QObject):
     """Application controller; only the organism is visible by default."""
 
     scene_changed = Signal(object, object, object)
-    homeostasis_changed = Signal(float, float, float, float, float, float)
+    homeostasis_changed = Signal(
+        float, float, float, float, float, float, float
+    )
     persist_neural = Signal()
 
     def __init__(self) -> None:
@@ -1305,6 +1321,7 @@ class FlybitWindow(QObject):
         self.care = CareModel(self.state)
         self.life = LifeModel(self.state)
         self.circadian = CircadianModel(self.state)
+        self.arousal = ThreatArousalModel()
         self.olfaction = FoodOdorModel()
         self.semantic_scanner = DesktopSemanticScanner()
         self.nearby_objects: tuple[PerceivedObject, ...] = ()
@@ -1487,6 +1504,11 @@ class FlybitWindow(QObject):
             ambient_luminance=ambient,
         )
         circadian = self.circadian.snapshot()
+        self.arousal.tick(
+            0.020,
+            escape_drive=self.latest_motor.escape,
+        )
+        arousal = self.arousal.snapshot()
         self.homeostasis_changed.emit(
             self.care.homeostatic_drive,
             life.vitality,
@@ -1494,6 +1516,7 @@ class FlybitWindow(QObject):
             life.boldness,
             life.curiosity,
             circadian.rest_drive,
+            arousal.threat_arousal,
         )
         bounds = self._desktop_bounds()
         physiology_gain = life.vitality * (0.78 + 0.30 * life.activity)
@@ -1617,6 +1640,7 @@ class FlybitWindow(QObject):
             self.life.snapshot(),
             self.kinematics.biomechanics(),
             self.circadian.snapshot(),
+            self.arousal.snapshot(),
         )
 
     @Slot()
