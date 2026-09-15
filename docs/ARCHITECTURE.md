@@ -197,3 +197,13 @@ resulting rest drive modulates global neural tonic activity, intrinsic noise and
 locomotor readiness. It never calls a sleep, wake, turn or escape action
 directly. The clock shape and timescales are computational approximations rather
 than a complete emulation of the Drosophila circadian network.
+
+
+## Modeled food odor field
+
+The desktop sugar source now emits a smooth synthetic odor field sampled at two
+virtual antenna positions. Hunger changes the observer salience of that odor but
+does not change its physical concentration. Left/right concentration and
+gradient are exposed in the Care panel. The odor signal is intentionally not
+injected into MaleCNS yet: the bundled runtime metadata does not provide the
+receptor-level olfactory mapping needed to make that claim responsibly.
