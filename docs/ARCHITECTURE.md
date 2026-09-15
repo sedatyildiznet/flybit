@@ -207,3 +207,15 @@ does not change its physical concentration. Left/right concentration and
 gradient are exposed in the Care panel. The odor signal is intentionally not
 injected into MaleCNS yet: the bundled runtime metadata does not provide the
 receptor-level olfactory mapping needed to make that claim responsibly.
+
+
+## Habituation and sensitization
+
+Repeated raw retinal expansion gradually reduces the modeled looming-transducer
+gain and recovers when expansion stops. Strong stimuli retain a non-zero response.
+This is short-term sensory habituation, not a motor policy.
+
+Conversely, when the nervous system itself produces DN escape output, a
+short-lived threat-arousal state rises and decays over seconds. That state
+modulates global neural tonic/noise/readiness only; it cannot trigger an escape
+on its own. This gives post-escape sensitization without a mouse-near rule.
