@@ -34,6 +34,7 @@ class SensoryDynamics:
     ambient_luminance: float
     retinal_loom_left: float
     retinal_loom_right: float
+    loom_habituation: float
 
 
 class DesktopMotionModel:
@@ -53,6 +54,7 @@ class DesktopMotionModel:
         self._last_distance: float | None = None
         self._last_angular_radius: float | None = None
         self._last_luminance: np.ndarray | None = None
+        self._loom_habituation = 0.0
 
     @staticmethod
     def _clamp01(value: float) -> float:
@@ -208,10 +210,35 @@ class DesktopMotionModel:
         )
 
         lum = np.asarray(luminance, dtype=np.float32).reshape(-1)
-        retinal_loom_left, retinal_loom_right = self._retinal_loom(
+        raw_loom_left, raw_loom_right = self._retinal_loom(
             self._last_luminance,
             lum,
         )
+        raw_loom = max(raw_loom_left, raw_loom_right)
+        if raw_loom > 0.04:
+            self._loom_habituation = self._clamp01(
+                self._loom_habituation
+                + dt * raw_loom / 2.8
+            )
+        else:
+            self._loom_habituation = self._clamp01(
+                self._loom_habituation
+                - dt / 12.0
+            )
+
+        # Repeated harmless expansion gradually loses gain, while a strong
+        # stimulus retains a minimum response. This is sensory habituation,
+        # never a direct change to motor output.
+        habituation_gain = 1.0 - 0.68 * self._loom_habituation
+        retinal_loom_left = self._clamp01(
+            raw_loom_left
+            * (habituation_gain + 0.18 * raw_loom_left)
+        )
+        retinal_loom_right = self._clamp01(
+            raw_loom_right
+            * (habituation_gain + 0.18 * raw_loom_right)
+        )
+
         optic_flow = self._optic_flow(self._last_luminance, lum, dt)
         ambient_luminance = float(np.clip(lum.mean(), 0.0, 1.0))
 
@@ -240,4 +267,5 @@ class DesktopMotionModel:
             ambient_luminance=ambient_luminance,
             retinal_loom_left=retinal_loom_left,
             retinal_loom_right=retinal_loom_right,
+            loom_habituation=float(self._loom_habituation),
         )
