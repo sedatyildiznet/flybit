@@ -8,6 +8,7 @@ on:
       - "flybit/neural.py"
       - "flybit/sensory.py"
       - "flybit/circadian.py"
+      - "flybit/olfaction.py"
       - "flybit/vision.py"
       - "flybit/ui.py"
       - "flybit/state.py"
