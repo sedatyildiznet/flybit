@@ -83,7 +83,7 @@ raw desktop pixels
     -> graded L1/L2/L3
     -> rest of MaleCNS
     -> descending-neuron motor read-out
-    -> flat 2-D desktop body
+    -> 2.5-D desktop body (screen x/y + independent altitude)
 ```
 
 The screen sampler performs luminance downsampling only. It does not identify windows, text, objects, motion classes or threats. The cursor is rendered into the retinal panorama as a silhouette because platform screen capture commonly omits the hardware pointer.
@@ -109,7 +109,7 @@ MaleCNS is a measured wiring diagram. Flybit is still a computational nervous-sy
 
 ## Desktop body bridge
 
-The current Windows organism uses a deliberately small 2-D kinematic decoder. It does not inspect the cursor or window state to select behaviour.
+The current Windows organism uses a deliberately small 2.5-D kinematic decoder. It does not inspect the cursor or window state to select behaviour.
 
 Measured/identified descending-neuron groups provide the motor signal:
 
@@ -119,9 +119,9 @@ Measured/identified descending-neuron groups provide the motor signal:
 - `DNg02_*` MaleCNS subtypes -> flight-thrust / wing-power drive
 - `MDN` -> backward locomotor drive
 
-The whole desktop is one flat locomotion plane. The body decoder has planar drag and desktop boundaries, but no downward gravity, falling or window-edge landing physics.
+Screen x/y form one flat locomotion plane. Flight now has a separate virtual altitude and vertical-velocity axis. DNp01 supplies a take-off impulse and DNg02 contributes sustained lift; gravity acts only on this virtual altitude, never on monitor Y. Landing occurs when altitude returns to the desktop plane. This preserves the no-falling-across-the-monitor rule while giving airborne state physical duration.
 
-DNp01 starts a short planar flight burst rather than a fake vertical jump. DNa02 is decoded as yaw-only steering, so the rendered body cannot roll or pitch into somersaults.
+DNa02 is decoded as yaw-only steering, so the rendered body cannot roll or pitch into somersaults. Grounded rendering derives an alternating tripod gait from locomotor phase; the gait is presentation/body coupling and does not choose direction.
 
 Most descending motor groups are converted to short-window firing-rate estimates before force mapping. This prevents isolated stochastic spikes from becoming full movement commands while preserving sustained neural activity. DNp01 is the exception: Giant Fiber take-off physiology is event-like, so one DNp01 spike is preserved as an immediate escape signal.
 
