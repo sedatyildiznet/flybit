@@ -51,6 +51,7 @@ Flybit currently:
 - maintains modeled circadian wake drive and persistent sleep pressure; these reduce/increase global neural arousal instead of issuing a scripted sleep command
 - adds short-term retinal looming habituation and DN-escape-driven sensitization; neither mechanism issues a direct motor command
 - adds semantic desktop perception for cursor, windows, native buttons and recognized applications such as Chrome
+- scans visible native window rectangles with Win32 Z-order and uses them as grounded substrate/contact context; window identity never selects movement
 - reports biomechanical telemetry including speed, acceleration, turn rate, gait phase, wingbeat rate and locomotor load
 - builds a Windows executable through GitHub Actions
 - runs a separate real-MaleCNS graded-vision validation workflow
@@ -85,7 +86,7 @@ A single DNp01/Giant Fiber spike is preserved as an immediate escape/take-off si
 
 Click the fly to open the native resizable control panel. It contains Overview, Brain, Care, Events, Perception and Life tabs. The Perception tab exposes temporal cursor/looming/TTC/optic-flow diagnostics. The persistent organism name can be changed only from the Life tab. Only the Windows title-bar close button is shown; closing the panel hides it without terminating the organism. The panel size and position persist across launches.
 
-The current body is a 2.5-D kinematic motor decoder: x/y are desktop coordinates while altitude/vertical velocity are independent flight state. Grounded rendering uses an alternating tripod gait derived from locomotor telemetry. It is still not a complete musculoskeletal Drosophila simulation.
+The current body is a 2.5-D kinematic motor decoder: x/y are desktop coordinates while altitude/vertical velocity are independent flight state. Visible native window rectangles are refreshed from Win32 and the topmost rectangle under the grounded body is reported as its current substrate; outside a window the support is the desktop plane. Grounded rendering uses an alternating tripod gait derived from locomotor telemetry. It is still not a complete musculoskeletal Drosophila simulation.
 
 ## Feeding
 
