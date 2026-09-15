@@ -112,17 +112,50 @@ class FlybitNeuralCore:
         self._homeostatic_drive = 0.0
         self._vitality = 1.0
         self._activity_trait = 0.5
+        self._boldness_trait = 0.5
+        self._curiosity_trait = 0.5
+        self._base_tonic = float(self.brain.tonic)
+        self._base_noise_hz = float(self.brain.noise_hz)
 
     def set_homeostasis(
         self,
         hunger: float,
         vitality: float,
         activity_trait: float = 0.5,
+        boldness_trait: float = 0.5,
+        curiosity_trait: float = 0.5,
     ) -> None:
-        """Update internal physiological context without selecting direction."""
+        """Update global physiology without selecting a direction or action.
+
+        Individual traits modulate tonic/arousal statistics only. They never
+        issue steering, feeding or escape commands.
+        """
         self._homeostatic_drive = float(np.clip(hunger, 0.0, 1.0))
         self._vitality = float(np.clip(vitality, 0.0, 1.0))
         self._activity_trait = float(np.clip(activity_trait, 0.0, 1.0))
+        self._boldness_trait = float(np.clip(boldness_trait, 0.0, 1.0))
+        self._curiosity_trait = float(np.clip(curiosity_trait, 0.0, 1.0))
+
+        vitality_gain = 0.35 + 0.65 * self._vitality
+        tonic_gain = (
+            0.72
+            + 0.28 * self._activity_trait
+            + 0.12 * self._homeostatic_drive
+            + 0.08 * self._boldness_trait
+        ) * vitality_gain
+        noise_gain = (
+            0.60
+            + 0.35 * self._activity_trait
+            + 0.25 * self._curiosity_trait
+            + 0.15 * self._homeostatic_drive
+        ) * (0.55 + 0.45 * self._vitality)
+
+        self.brain.tonic = self._base_tonic * float(
+            np.clip(tonic_gain, 0.20, 1.35)
+        )
+        self.brain.noise_hz = self._base_noise_hz * float(
+            np.clip(noise_gain, 0.20, 1.65)
+        )
 
     def _resolve_cells(
         self,
@@ -374,6 +407,8 @@ class FlybitNeuralCore:
         # locomotor readiness while preserving the network's left/right choice.
         arousal = 0.72 + 0.38 * self._homeostatic_drive
         arousal *= 0.82 + 0.28 * self._activity_trait
+        arousal *= 0.92 + 0.12 * self._boldness_trait
+        arousal *= 0.90 + 0.14 * self._curiosity_trait
         arousal *= 0.35 + 0.65 * self._vitality
         forward_l = float(
             np.clip(
