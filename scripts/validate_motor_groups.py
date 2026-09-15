@@ -30,10 +30,18 @@ def main() -> int:
     for name, group in core.motor_groups.items():
         print(f"  {name:12s} {len(group):3d}")
 
+    for side, group in core.loom_groups.items():
+        print(f"  LPLC2_{side:1s}     {len(group):3d}")
+
     missing = [
         name
         for name in REQUIRED
         if len(core.motor_groups[name]) == 0
+    ]
+    missing += [
+        f"LPLC2_{side}"
+        for side, group in core.loom_groups.items()
+        if len(group) == 0
     ]
     if missing:
         raise SystemExit(
