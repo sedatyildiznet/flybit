@@ -14,6 +14,8 @@ import numpy as np
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication, QImage, qGray
 
+from .sensory import DesktopMotionModel, SensoryDynamics
+
 
 class DesktopRetinaSampler:
     """Sample the screen around the fly as raw luminance rays."""
@@ -33,6 +35,7 @@ class DesktopRetinaSampler:
             endpoint=False,
             dtype=np.float32,
         )
+        self.motion = DesktopMotionModel(cursor_radius=14.0)
 
     @staticmethod
     def _screen_at(point: QPoint):
@@ -160,3 +163,35 @@ class DesktopRetinaSampler:
             0.0,
             1.0,
         ).astype(np.float32)
+
+
+    def sample_with_dynamics(
+        self,
+        *,
+        x: float,
+        y: float,
+        heading: float,
+        cursor: QPoint | None = None,
+        food: tuple[float, float, float] | None = None,
+        timestamp: float | None = None,
+    ) -> tuple[np.ndarray, SensoryDynamics | None]:
+        """Capture retina and temporal motion cues from the same observation."""
+        luminance = self.sample(
+            x=x,
+            y=y,
+            heading=heading,
+            cursor=cursor,
+            food=food,
+        )
+        if cursor is None:
+            return luminance, None
+        dynamics = self.motion.update(
+            body_x=x,
+            body_y=y,
+            heading=heading,
+            cursor_x=float(cursor.x()),
+            cursor_y=float(cursor.y()),
+            luminance=luminance,
+            timestamp=timestamp,
+        )
+        return luminance, dynamics
