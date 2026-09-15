@@ -1,9 +1,10 @@
-"""2-D desktop body bridge driven only by MaleCNS motor read-outs.
+"""2.5-D desktop body bridge driven only by MaleCNS motor read-outs.
 
-The Windows desktop is treated as a flat locomotion plane, not a vertical world.
-There is no downward gravity, falling or edge-bounce rotation. Identified
-descending neurons provide locomotor/steering/escape drive; the body decoder
-turns those outputs into planar velocity.
+Screen x/y remain a flat desktop locomotion plane. A separate virtual altitude
+axis models take-off, sustained flight and landing, so gravity never pulls the
+organism toward the bottom of the monitor. Identified descending neurons provide
+locomotor/steering/escape drive; the body decoder translates those outputs into
+planar velocity plus vertical flight dynamics.
 """
 from __future__ import annotations
 
@@ -57,6 +58,8 @@ class FlyBodyState:
     angular_velocity: float = 0.0
     airborne: bool = False
     flight_energy: float = 0.0
+    altitude: float = 0.0
+    vertical_velocity: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -73,10 +76,12 @@ class BiomechanicsSnapshot:
     gait_phase: float
     wingbeat_hz: float
     locomotor_load: float
+    altitude: float
+    vertical_speed: float
 
 
 class FlyKinematics:
-    """Planar desktop body model.
+    """Planar desktop body with an independent virtual altitude axis.
 
     Neural mapping:
       DNg100 -> forward locomotor drive
@@ -172,9 +177,9 @@ class FlyKinematics:
             s.heading + s.angular_velocity * dt
         )
 
-        # A rising DNp01 response starts a brief planar flight burst. The body
-        # remains on the desktop plane: "airborne" controls wing rendering and
-        # motor scale only, not a fake vertical gravity axis.
+        # A rising DNp01 response starts a true take-off on a separate virtual
+        # altitude axis. This avoids the old mistake of treating screen Y as
+        # physical height while still giving flight a real airborne state.
         if (
             self._escape > 0.06
             and self._escape_prev <= 0.06
@@ -184,6 +189,11 @@ class FlyKinematics:
                 s.flight_energy,
                 0.55 + self._escape * 0.75,
             )
+            s.vertical_velocity = max(
+                s.vertical_velocity,
+                95.0 + 85.0 * self._escape,
+            )
+            s.altitude = max(s.altitude, 0.5)
             events.append(
                 MotionEvent(
                     "takeoff",
@@ -204,19 +214,48 @@ class FlyKinematics:
                 0.0,
                 s.flight_energy - dt,
             )
-        elif (
-            s.airborne
-            and self._escape < 0.025
-        ):
-            s.airborne = False
-            events.append(
-                MotionEvent(
-                    "land",
-                    "desktop plane",
-                )
-            )
 
         physiology_gain = max(0.05, min(1.25, float(physiology_gain)))
+
+        if s.airborne:
+            gravity = 180.0
+            lift = (
+                motor.flight * 230.0
+                + self._escape * 300.0
+            ) * physiology_gain
+            s.vertical_velocity += (lift - gravity) * dt
+            s.vertical_velocity *= math.exp(-1.35 * dt)
+            s.altitude += s.vertical_velocity * dt
+
+            if s.altitude >= 110.0:
+                s.altitude = 110.0
+                s.vertical_velocity = min(0.0, s.vertical_velocity)
+
+            if s.altitude <= 0.0:
+                s.altitude = 0.0
+                if (
+                    self._escape < 0.025
+                    and motor.flight < 0.04
+                ):
+                    s.airborne = False
+                    s.vertical_velocity = 0.0
+                    events.append(
+                        MotionEvent(
+                            "land",
+                            "virtual altitude reached desktop plane",
+                        )
+                    )
+                else:
+                    s.altitude = 0.5
+                    s.vertical_velocity = max(
+                        20.0,
+                        s.vertical_velocity,
+                    )
+        else:
+            s.altitude = 0.0
+            s.vertical_velocity = 0.0
+
+
         walk_drive = (self._forward - self._backward) * physiology_gain
         if s.airborne:
             speed_target = (
@@ -336,4 +375,6 @@ class FlyKinematics:
             gait_phase=float(self._gait_phase),
             wingbeat_hz=float(self._wingbeat_hz),
             locomotor_load=float(self._locomotor_load),
+            altitude=float(self.state.altitude),
+            vertical_speed=float(self.state.vertical_velocity),
         )
