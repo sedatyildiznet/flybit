@@ -1,7 +1,8 @@
 """Windows desktop geometry exposed to the Flybit body simulation.
 
-This module does not choose behaviour. It only turns visible top-level Windows
-into horizontal physical surfaces that the body can collide with and land on.
+This module does not choose behaviour. It converts visible top-level windows
+into substrate rectangles so body contact/landing can be grounded in the
+current desktop geometry. Application names remain observer metadata only.
 """
 from __future__ import annotations
 
@@ -14,20 +15,63 @@ import sys
 
 @dataclass(frozen=True)
 class Surface:
-    """Horizontal top edge of a visible desktop window."""
+    """Visible desktop substrate backed by one top-level native window."""
 
     id: int
     left: float
     right: float
     top: float
+    bottom: float
     title: str = ""
+    z_order: int = 0
+
+    @property
+    def width(self) -> float:
+        return max(0.0, self.right - self.left)
+
+    @property
+    def height(self) -> float:
+        return max(0.0, self.bottom - self.top)
+
+    def contains(
+        self,
+        x: float,
+        y: float,
+        *,
+        margin: float = 0.0,
+    ) -> bool:
+        m = max(0.0, float(margin))
+        return (
+            self.left + m <= float(x) <= self.right - m
+            and self.top + m <= float(y) <= self.bottom - m
+        )
+
+
+def support_at(
+    surfaces: list[Surface],
+    x: float,
+    y: float,
+) -> Surface | None:
+    """Return the topmost visible window under a desktop coordinate.
+
+    A None result means the underlying desktop/glass plane. This is geometry
+    only; it never changes heading or chooses a movement.
+    """
+    candidates = [
+        surface
+        for surface in surfaces
+        if surface.contains(x, y)
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda surface: surface.z_order)
 
 
 class WindowSurfaceScanner:
     """Read visible top-level Windows using the Win32 API.
 
-    Flybit's own process windows are excluded so the fly cannot land on its own
-    overlay/control panel.
+    Flybit's own process windows are excluded so the organism cannot treat its
+    overlay/control panel as an external substrate.
     """
 
     def __init__(self) -> None:
@@ -39,6 +83,7 @@ class WindowSurfaceScanner:
 
         user32 = ctypes.windll.user32
         surfaces: list[Surface] = []
+        z_counter = 0
 
         enum_proc = ctypes.WINFUNCTYPE(
             wintypes.BOOL,
@@ -48,6 +93,11 @@ class WindowSurfaceScanner:
 
         @enum_proc
         def callback(hwnd, _lparam):
+            nonlocal z_counter
+
+            current_z = z_counter
+            z_counter += 1
+
             if not user32.IsWindowVisible(hwnd):
                 return True
             if user32.IsIconic(hwnd):
@@ -95,7 +145,7 @@ class WindowSurfaceScanner:
                     buf,
                     len(buf),
                 )
-                title = buf.value
+                title = buf.value.strip()
 
             surfaces.append(
                 Surface(
@@ -103,11 +153,12 @@ class WindowSurfaceScanner:
                     left=float(rect.left),
                     right=float(rect.right),
                     top=float(rect.top),
+                    bottom=float(rect.bottom),
                     title=title,
+                    z_order=current_z,
                 )
             )
             return True
 
         user32.EnumWindows(callback, 0)
-        surfaces.sort(key=lambda s: s.top)
         return surfaces
