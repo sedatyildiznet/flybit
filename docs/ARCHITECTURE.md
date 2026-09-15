@@ -143,3 +143,32 @@ The panel does not provide direct movement commands. Feeding changes persistent 
 Flybit maintains app-level nutritional state: hunger, feeding count and last-feed timestamp. A sugar drop is a real desktop-world object with position and collision radius. Consumption occurs only when the body overlaps the drop.
 
 This is deliberately separated from neural claims. The bundled MaleCNS metadata used by Flybit does not currently expose receptor-level sweet-GRN identity, so Flybit does not pretend to inject a biologically exact sugar taste signal. When a validated receptor/cell mapping is available in the bundled data, gustatory transduction can be added without changing this physical contact model.
+
+
+## Semantic perception boundary
+
+Flybit now maintains a separate OS-level semantic perception stream for coarse
+desktop entities: hardware cursor, top-level windows, native Win32 buttons and
+recognized application processes such as Chrome. These labels are displayed in
+telemetry and may provide future sensory context, but they are not action
+commands and are not allowed to bypass the MaleCNS/body loop.
+
+## Homeostasis and life history
+
+Hunger is represented as an internal homeostatic drive. It modulates locomotor
+readiness symmetrically rather than selecting a target or turn direction.
+Feeding requires physical contact, reduces hunger, emits a short feeding signal
+and restores metabolic energy.
+
+Each persistent organism has a wall-clock birth timestamp, deterministic
+individual phenotype, finite modeled lifespan, metabolic energy and vitality.
+Ageing and energy can reduce body capacity. These are computational organism
+states; they must not be described as literal biological immortality or a
+complete living animal.
+
+## Biomechanical telemetry
+
+The 2-D body now exposes speed, acceleration, turn rate, gait phase, estimated
+wingbeat rate and locomotor load. This does not yet replace the kinematic body
+with a full musculoskeletal Drosophila model, but it creates the instrumentation
+needed to validate that future biomechanical layer.

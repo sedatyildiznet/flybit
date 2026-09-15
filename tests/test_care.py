@@ -23,6 +23,14 @@ class CareModelTest(unittest.TestCase):
         self.assertGreater(state.hunger, before)
         self.assertLessEqual(state.hunger, 1.0)
 
+    def test_hunger_exposes_internal_homeostatic_drive(self):
+        state = self.make_state()
+        care = CareModel(state)
+        drive = care.homeostatic_drive
+        self.assertGreater(drive, 0.0)
+        state.hunger = 0.1
+        self.assertEqual(care.homeostatic_drive, 0.0)
+
     def test_food_requires_physical_contact(self):
         state = self.make_state()
         care = CareModel(state)
@@ -44,6 +52,7 @@ class CareModelTest(unittest.TestCase):
         self.assertLess(state.hunger, 0.75)
         self.assertEqual(state.feedings, 1)
         self.assertIsNotNone(state.last_feed_at)
+        self.assertEqual(care.feeding_signal, 1.0)
 
 
 if __name__ == "__main__":

@@ -29,8 +29,20 @@ class CareModel:
     def __init__(self, state: FlybitState) -> None:
         self.state = state
         self.food: FoodDrop | None = None
+        self.feeding_signal = 0.0
+
+    @property
+    def homeostatic_drive(self) -> float:
+        """Internal hunger drive exposed to the nervous-system bridge."""
+        h = max(0.0, min(1.0, float(self.state.hunger)))
+        # Keep a quiet fed baseline, then rise sharply past moderate hunger.
+        return max(0.0, min(1.0, (h - 0.22) / 0.78))
 
     def tick(self, dt: float) -> None:
+        self.feeding_signal = max(
+            0.0,
+            self.feeding_signal - max(0.0, float(dt)) / 8.0,
+        )
         self.state.hunger = min(
             1.0,
             max(
@@ -81,6 +93,7 @@ class CareModel:
             self.state.hunger - reduction,
         )
         self.state.feedings += 1
+        self.feeding_signal = 1.0
         self.state.last_feed_at = datetime.now(
             timezone.utc
         ).isoformat()

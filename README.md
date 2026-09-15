@@ -39,6 +39,10 @@ Flybit currently:
 - smooths descending-neuron firing into short-window motor rates to prevent single-spike spin artifacts
 - includes a branded application/EXE icon and a native resizable tabbed Windows control panel
 - includes persistent Care state and physical sugar-drop feeding
+- exposes hunger as an internal homeostatic drive that modulates neural locomotor readiness without choosing direction
+- tracks wall-clock age, finite modeled lifespan, metabolic energy, vitality and stable individual phenotype
+- adds semantic desktop perception for cursor, windows, native buttons and recognized applications such as Chrome
+- reports biomechanical telemetry including speed, acceleration, turn rate, gait phase, wingbeat rate and locomotor load
 - builds a Windows executable through GitHub Actions
 - runs a separate real-MaleCNS graded-vision validation workflow
 
@@ -64,13 +68,13 @@ pip install -e ".[desktop]"
 python -m flybit
 ```
 
-During normal use Flybit appears as a small always-on-top fly moving across the desktop plane. The screen is sampled as raw luminance rays around the fly (384 angular bins across six radii) and interpolated onto the MaleCNS photoreceptors. There is no OCR, object detection or threat classifier in this path.
+During normal use Flybit appears as a small always-on-top fly moving across the desktop plane. The screen is sampled as raw luminance rays around the fly (384 angular bins across six radii) and interpolated onto the MaleCNS photoreceptors. The retinal path itself still has no OCR or threat classifier. A separate OS-level semantic perception layer labels coarse desktop entities (cursor, windows, native Win32 buttons and common applications) for sensory context and telemetry; labels never map directly to movement commands.
 
 Windows, icons, text, images, video and other visible screen content can therefore change retinal input directly. The hardware cursor is added as a retinal silhouette because normal screen capture often omits it. Cursor distance never calls an escape routine directly.
 
 A single DNp01/Giant Fiber spike is preserved as an immediate escape/take-off signal instead of being averaged away by a rate threshold. DNg02 MaleCNS subtypes provide sustained flight-thrust activity. DNg100 remains the primary forward-walking read-out, while bilateral DNa01/DNa02 activity contributes locomotor drive as well as steering. MDN provides backward drive.
 
-Click the fly to open the native resizable control panel. It contains Overview, Brain, Care and Events tabs. Only the Windows title-bar close button is shown; closing the panel hides it without terminating the organism. The panel size and position persist across launches.
+Click the fly to open the native resizable control panel. It contains Overview, Brain, Care, Events, Perception and Life tabs. Only the Windows title-bar close button is shown; closing the panel hides it without terminating the organism. The panel size and position persist across launches.
 
 The current body is a 2-D kinematic motor decoder, not yet a complete musculoskeletal Drosophila simulation.
 
@@ -78,7 +82,7 @@ The current body is a 2-D kinematic motor decoder, not yet a complete musculoske
 
 The Care tab can place a visible sugar drop anywhere on the desktop. Placement uses a temporary full-desktop click layer; the fly must physically contact the drop before it is consumed. Hunger, feeding count and last-feed time persist across launches.
 
-Food is also rendered into the retinal panorama, but hunger does not directly steer the fly toward it. Exact sweet-receptor/gustatory-neuron injection is intentionally disabled until receptor-level identity is available in the bundled MaleCNS metadata.
+Food is also rendered into the retinal panorama. Hunger is now represented as an internal homeostatic drive: it increases neural locomotor readiness and interacts with metabolic vitality, but it still does not directly steer the fly toward food. Exact sweet-receptor/gustatory-neuron injection is intentionally disabled until receptor-level identity is available in the bundled MaleCNS metadata.
 
 ## Validation
 

@@ -116,6 +116,30 @@ class MotionBridgeTest(unittest.TestCase):
         self.assertGreater(body.x, 20.0)
         self.assertGreater(body.y, 15.0)
 
+    def test_biomechanics_reports_gait_and_load(self):
+        body = FlyBodyState(x=200.0, y=200.0, heading=0.0)
+        model = FlyKinematics(body)
+        for _ in range(40):
+            model.update(
+                MotorActivity(forward_left=1.0, forward_right=1.0),
+                [],
+                (0.0, 0.0, 800.0, 600.0),
+                dt=0.020,
+            )
+        bio = model.biomechanics()
+        self.assertGreater(bio.speed, 0.0)
+        self.assertGreater(bio.locomotor_load, 0.0)
+        self.assertGreaterEqual(bio.gait_phase, 0.0)
+
+    def test_low_vitality_reduces_motion_capacity(self):
+        strong = FlyKinematics(FlyBodyState(x=200.0, y=200.0))
+        weak = FlyKinematics(FlyBodyState(x=200.0, y=200.0))
+        motor = MotorActivity(forward_left=1.0, forward_right=1.0)
+        for _ in range(40):
+            strong.update(motor, [], (0, 0, 800, 600), dt=0.020, physiology_gain=1.0)
+            weak.update(motor, [], (0, 0, 800, 600), dt=0.020, physiology_gain=0.25)
+        self.assertGreater(strong.biomechanics().speed, weak.biomechanics().speed)
+
     def test_no_gravity_drift_without_motor_output(self):
         body = FlyBodyState(
             x=320.0,
