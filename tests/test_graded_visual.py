@@ -109,7 +109,7 @@ class GradedVisualTest(unittest.TestCase):
 
         # Repeated identical input should adapt toward zero magnitude.
         latest = dark
-        for _ in range(20):
+        for _ in range(80):
             latest = eyes.contrast_drive(
                 [Blob(center=-0.5, half_width=0.1, darkness=1.0)]
             )
