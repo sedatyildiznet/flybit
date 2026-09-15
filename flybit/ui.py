@@ -847,6 +847,48 @@ class ControlPanel(QWidget):
         perception_layout.addWidget(perception_note)
         self.tabs.addTab(perception_tab, "Perception")
 
+        # Model boundary / provenance
+        model_tab = QWidget()
+        model_layout = QVBoxLayout(model_tab)
+        model_layout.setContentsMargins(8, 12, 8, 8)
+        model_title = QLabel("MODEL BOUNDARY & PROVENANCE")
+        model_title.setObjectName("section")
+        model_layout.addWidget(model_title)
+        model_text = QPlainTextEdit()
+        model_text.setReadOnly(True)
+        model_text.setObjectName("log")
+        model_text.setPlainText(
+            "MEASURED / DATA-DRIVEN\n"
+            "  • MaleCNS neuron identities and connection graph\n"
+            "  • connection direction / synapse-derived weights\n"
+            "  • transmitter-derived connection sign\n"
+            "  • mapped photoreceptor identities and azimuths\n"
+            "  • identified DN and LPLC2 cell types\n\n"
+            "MODELED\n"
+            "  • graded membrane constants / transfer functions\n"
+            "  • raw-luminance temporal looming → LPLC2 transduction\n"
+            "  • DN firing-rate → 2.5-D body decoder\n"
+            "  • altitude/lift/gravity and tripod gait rendering\n"
+            "  • hunger/metabolic/circadian/phenotype modulation\n\n"
+            "SYNTHETIC WORLD / TELEMETRY\n"
+            "  • desktop sugar object and nutrition collision\n"
+            "  • semantic Chrome/window/button labels\n"
+            "  • TTC/threat-salience/near-field observer metrics\n\n"
+            "NOT CLAIMED\n"
+            "  • complete biological brain emulation\n"
+            "  • receptor-accurate taste/odor/mechanosensation\n"
+            "  • complete muscles, hormones or synaptic plasticity"
+        )
+        model_layout.addWidget(model_text, 1)
+        model_note = QLabel(
+            "No modeled observer value may bypass the neural/body loop and "
+            "become a direct movement command."
+        )
+        model_note.setWordWrap(True)
+        model_note.setObjectName("foot")
+        model_layout.addWidget(model_note)
+        self.tabs.addTab(model_tab, "Model")
+
         # Life
         life_tab = QWidget()
         life_layout = QVBoxLayout(life_tab)
