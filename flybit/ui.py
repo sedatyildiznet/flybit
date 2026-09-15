@@ -402,6 +402,7 @@ class ControlPanel(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self._logs = deque(maxlen=40)
+        self._drag_offset: QPoint | None = None
 
         self.setWindowTitle(
             "Flybit Neural Control"
@@ -488,6 +489,12 @@ class ControlPanel(QWidget):
 
         self.brain_map = BrainMapWidget()
         root.addWidget(self.brain_map)
+
+        self.neural_detail = QLabel(
+            "retina —   lamina —   visual projection —"
+        )
+        self.neural_detail.setObjectName("muted")
+        root.addWidget(self.neural_detail)
 
         motor_header = QHBoxLayout()
         motor_label = QLabel("DESCENDING MOTOR OUTPUT")
@@ -701,6 +708,11 @@ class ControlPanel(QWidget):
             if airborne
             else "LANDED"
         )
+        self.neural_detail.setText(
+            f"retina rms {snap.photoreceptor_rms:.3f}   "
+            f"lamina rms {snap.lamina_rms:.3f}   "
+            f"visual projection {snap.visual_projection_spikes:,} spikes"
+        )
         self.brain_map.set_active(
             snap.active_brain_points
         )
@@ -746,6 +758,36 @@ class ControlPanel(QWidget):
         scrollbar.setValue(
             scrollbar.maximum()
         )
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and event.position().y() <= 62
+        ):
+            self._drag_offset = (
+                event.globalPosition().toPoint()
+                - self.frameGeometry().topLeft()
+            )
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if (
+            self._drag_offset is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
+            self.move(
+                event.globalPosition().toPoint()
+                - self._drag_offset
+            )
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        self._drag_offset = None
+        super().mouseReleaseEvent(event)
 
     def hideEvent(self, event) -> None:  # noqa: N802
         self.closed.emit()
