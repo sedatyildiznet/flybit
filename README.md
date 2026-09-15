@@ -31,12 +31,14 @@ Flybit currently:
 - keeps the remaining network on the upstream spiking dynamics
 - does **not** use the `FeatureDetectors` shortcut in the desktop organism path
 - exposes retina, lamina, visual-projection and descending-neuron telemetry
-- decodes identified descending neurons into a 2-D desktop body: DNg100 forward, DNa02 steering, DNp01 escape/take-off and MDN backward
+- decodes identified descending neurons into a 2-D desktop body: DNg100 + DNa01/DNa02 walking, DNa01/DNa02 steering, DNp01 escape/take-off, DNg02 flight thrust and MDN backward
 - treats the whole desktop as one flat 2-D locomotion plane; no downward gravity/falling model
 - shows only the fly during normal use; clicking it opens a live neural control panel with brain map, motor channels and short logs
-- persists desktop position/heading across launches
+- migrates old edge-stranded state safely, then persists desktop position/heading and control-panel geometry across launches
 - samples raw desktop pixels rather than only tracking the cursor
 - smooths descending-neuron firing into short-window motor rates to prevent single-spike spin artifacts
+- includes a branded application/EXE icon and a native resizable tabbed Windows control panel
+- includes persistent Care state and physical sugar-drop feeding
 - builds a Windows executable through GitHub Actions
 - runs a separate real-MaleCNS graded-vision validation workflow
 
@@ -66,25 +68,34 @@ During normal use Flybit appears as a small always-on-top fly moving across the 
 
 Windows, icons, text, images, video and other visible screen content can therefore change retinal input directly. The hardware cursor is added as a retinal silhouette because normal screen capture often omits it. Cursor distance never calls an escape routine directly.
 
-DNp01 activity produces a short planar flight burst with wing animation; there is no fake downward gravity axis. DNg100, DNa02 and MDN remain the forward, steering and backward read-outs. Motor activity is decoded from a short firing-rate window so isolated stochastic spikes do not cause abrupt spins.
+A single DNp01/Giant Fiber spike is preserved as an immediate escape/take-off signal instead of being averaged away by a rate threshold. DNg02 MaleCNS subtypes provide sustained flight-thrust activity. DNg100 remains the primary forward-walking read-out, while bilateral DNa01/DNa02 activity contributes locomotor drive as well as steering. MDN provides backward drive.
 
-Click the fly to open the neural control panel. The panel uses a native resizable Windows frame and can be resized from its edges/corners.
+Click the fly to open the native resizable control panel. It contains Overview, Brain, Care and Events tabs. Only the Windows title-bar close button is shown; closing the panel hides it without terminating the organism. The panel size and position persist across launches.
 
 The current body is a 2-D kinematic motor decoder, not yet a complete musculoskeletal Drosophila simulation.
 
+## Feeding
+
+The Care tab can place a visible sugar drop anywhere on the desktop. Placement uses a temporary full-desktop click layer; the fly must physically contact the drop before it is consumed. Hunger, feeding count and last-feed time persist across launches.
+
+Food is also rendered into the retinal panorama, but hunger does not directly steer the fly toward it. Exact sweet-receptor/gustatory-neuron injection is intentionally disabled until receptor-level identity is available in the bundled MaleCNS metadata.
+
 ## Validation
 
-Run the small deterministic tests:
+Run the deterministic tests:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-With the MaleCNS data available, validate the real early visual relay:
+With the MaleCNS data available, validate both the early visual relay and the real motor groups/decoder:
 
 ```bash
 python scripts/validate_graded_vision.py
+python scripts/validate_motor_groups.py
 ```
+
+The motor validation resolves real MaleCNS DNg02 subtypes, verifies a single DNp01 spike survives as take-off, checks DNa-driven locomotion and DNg02 flight thrust, and runs an end-to-end raw-retina challenge that must produce translational motor output.
 
 ## Roadmap
 
