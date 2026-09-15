@@ -50,6 +50,7 @@ from .motion import (
     MotorActivity,
 )
 from .neural import FlybitNeuralCore, NeuralSnapshot
+from .olfaction import FoodOdorModel
 from .state import load_state, normalize_display_name, save_state
 from .vision import DesktopRetinaSampler
 
@@ -774,6 +775,13 @@ class ControlPanel(QWidget):
         self.last_feed_label.setObjectName("muted")
         care_layout.addWidget(self.last_feed_label)
 
+        self.odor_status = QLabel(
+            "Odor field · no source · neural coupling disabled"
+        )
+        self.odor_status.setWordWrap(True)
+        self.odor_status.setObjectName("muted")
+        care_layout.addWidget(self.odor_status)
+
         self.feed_button = QPushButton("Place sugar…")
         self.feed_button.setObjectName("primary")
         self.feed_button.clicked.connect(
@@ -1154,6 +1162,7 @@ class ControlPanel(QWidget):
         feedings: int,
         last_feed: str | None,
         food_active: bool,
+        odor=None,
     ) -> None:
         pct = int(max(0.0, min(1.0, hunger)) * 100)
         self.hunger.setValue(pct)
@@ -1172,6 +1181,16 @@ class ControlPanel(QWidget):
             if food_active
             else "Place sugar…"
         )
+        if odor is not None and odor.food_distance is not None:
+            self.odor_status.setText(
+                f"Modeled odor · L {odor.left:.3f} / R {odor.right:.3f} · "
+                f"gradient {odor.gradient:+.3f} · salience {odor.salience:.3f} · "
+                f"distance {odor.food_distance:.0f}px · neural coupling disabled"
+            )
+        else:
+            self.odor_status.setText(
+                "Odor field · no source · neural coupling disabled"
+            )
 
     def update_sensory(self, dynamics) -> None:
         if dynamics is None:
@@ -1286,6 +1305,7 @@ class FlybitWindow(QObject):
         self.care = CareModel(self.state)
         self.life = LifeModel(self.state)
         self.circadian = CircadianModel(self.state)
+        self.olfaction = FoodOdorModel()
         self.semantic_scanner = DesktopSemanticScanner()
         self.nearby_objects: tuple[PerceivedObject, ...] = ()
 
@@ -1572,11 +1592,26 @@ class FlybitWindow(QObject):
 
     @Slot()
     def _refresh_care(self) -> None:
+        body = self.kinematics.state
+        food = self.care.food
+        odor_food = (
+            (food.x, food.y, food.amount)
+            if food is not None
+            else None
+        )
+        odor = self.olfaction.sample(
+            x=body.x,
+            y=body.y,
+            heading=body.heading,
+            food=odor_food,
+            hunger_drive=self.care.homeostatic_drive,
+        )
         self.panel.update_care(
             hunger=self.state.hunger,
             feedings=self.state.feedings,
             last_feed=self.state.last_feed_at,
-            food_active=self.care.food is not None,
+            food_active=food is not None,
+            odor=odor,
         )
         self.panel.update_life(
             self.life.snapshot(),
