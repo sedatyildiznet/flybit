@@ -107,6 +107,16 @@ class FlybitNeuralCore:
                 dtype=np.int64,
             )
 
+        # Modeled temporal looming transduction targets the identified LPLC2
+        # visual-projection population. It never stimulates descending motor
+        # neurons directly and is disabled automatically if the type is absent.
+        self.loom_groups = {
+            "L": self._resolve_cells(["LPLC2"], side="L"),
+            "R": self._resolve_cells(["LPLC2"], side="R"),
+        }
+        self._retinal_loom_left = 0.0
+        self._retinal_loom_right = 0.0
+
         self._brain_xy = self._normalize_brain_positions()
         self._motor_rates = {
             name: 0.0
@@ -171,6 +181,19 @@ class FlybitNeuralCore:
         )
         self.brain.noise_hz = self._base_noise_hz * float(
             np.clip(noise_gain * rest_noise, 0.12, 1.65)
+        )
+
+    def set_visual_motion(
+        self,
+        loom_left: float,
+        loom_right: float,
+    ) -> None:
+        """Set modeled raw-retina looming cues for LPLC2 transduction."""
+        self._retinal_loom_left = float(
+            np.clip(loom_left, 0.0, 1.0)
+        )
+        self._retinal_loom_right = float(
+            np.clip(loom_right, 0.0, 1.0)
         )
 
     def _resolve_cells(
@@ -336,6 +359,13 @@ class FlybitNeuralCore:
     @property
     def neuron_count(self) -> int:
         return int(self.brain.n)
+
+    @property
+    def looming_cell_count(self) -> int:
+        return int(
+            len(self.loom_groups["L"])
+            + len(self.loom_groups["R"])
+        )
 
     @property
     def graded_cell_count(self) -> int:
@@ -720,8 +750,36 @@ class FlybitNeuralCore:
             receptor_luminance,
             dt=self.brain.dt,
         )
+
+        # Raw temporal expansion is an optic-lobe model boundary: the cue is
+        # derived from luminance only and injected into biologically identified
+        # LPLC2 visual projection cells, never into DN motor read-outs.
+        inject = []
+        loom_gain = 0.55
+        if (
+            self._retinal_loom_left > 0.0
+            and len(self.loom_groups["L"])
+        ):
+            inject.append(
+                (
+                    self.loom_groups["L"],
+                    self._retinal_loom_left * loom_gain,
+                )
+            )
+        if (
+            self._retinal_loom_right > 0.0
+            and len(self.loom_groups["R"])
+        ):
+            inject.append(
+                (
+                    self.loom_groups["R"],
+                    self._retinal_loom_right * loom_gain,
+                )
+            )
+
         fired = self.brain.step(
-            eye_drive=eye_drive
+            eye_drive=eye_drive,
+            inject=inject,
         )
         return self._finish_step(fired)
 
