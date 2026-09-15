@@ -22,7 +22,7 @@ class DesktopRetinaSampler:
         self,
         *,
         bins: int = 384,
-        radii: tuple[int, ...] = (28, 52, 86, 132, 190),
+        radii: tuple[int, ...] = (42, 72, 110, 165, 240, 340),
     ) -> None:
         self.bins = int(bins)
         self.radii = tuple(int(r) for r in radii)
