@@ -57,7 +57,7 @@ Only cell types with direct physiological support are placed in the graded set f
 
 The analog output is a bounded signed function of membrane state. Hyperpolarization and depolarization therefore both alter downstream release instead of a hyperpolarized cell becoming permanently silent.
 
-Connection identity, direction, weight and transmitter-derived sign still come from MaleCNS. There is no object, looming, threat or action classifier in this route.
+Connection identity, direction, weight and transmitter-derived sign still come from MaleCNS. There is no semantic object/threat/action classifier in this route. Flybit does include one explicit modeled optic-lobe boundary: frame-to-frame dark retinal expansion is converted into left/right looming drive on identified LPLC2 visual-projection cells. This compensates for motion selectivity that the simplified whole-CNS neuron model cannot be assumed to reproduce biophysically; it never stimulates descending motor neurons directly.
 
 The graded time constants and transfer scale are computational parameters rather than fitted single-cell biophysical models. They must not be presented as experimentally measured membrane constants.
 
@@ -86,7 +86,7 @@ raw desktop pixels
     -> 2.5-D desktop body (screen x/y + independent altitude)
 ```
 
-The screen sampler performs luminance downsampling only. It does not identify windows, text, objects, motion classes or threats. The cursor is rendered into the retinal panorama as a silhouette because platform screen capture commonly omits the hardware pointer.
+The screen sampler performs luminance downsampling only. It does not identify windows, text, objects or semantic threats. A separate temporal visual transducer compares consecutive raw panoramas to estimate retinal expansion and whole-field shift; the expansion channel is explicitly marked MODELED and targets LPLC2 rather than motor output. The cursor is rendered into the retinal panorama as a silhouette because platform screen capture commonly omits the hardware pointer.
 
 The desktop retina targets a 20 ms cadence. To keep this practical, capture is restricted to the local region actually reached by the six retinal radii instead of copying the complete display. Because cursor angular width is computed from physical screen geometry, an approaching cursor occupies progressively more angular bins and therefore produces real temporal looming in the retinal stream.
 
