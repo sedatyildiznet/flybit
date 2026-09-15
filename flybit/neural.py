@@ -93,6 +93,10 @@ class FlybitNeuralCore:
             )
 
         self._brain_xy = self._normalize_brain_positions()
+        self._motor_rates = {
+            name: 0.0
+            for name in self.motor_groups
+        }
 
     @property
     def device(self) -> str:
@@ -229,19 +233,73 @@ class FlybitNeuralCore:
         self,
         fired: np.ndarray,
     ) -> MotorActivity:
-        value = lambda name: self._fraction_fired(
-            fired,
-            self.motor_groups[name],
+        """Decode short-window firing rate from identified descending groups.
+
+        A single stochastic spike must not become a full body command. We
+        estimate an exponential firing rate over ~140 ms, then map activity
+        above a quiet baseline into 0..1 motor drive.
+        """
+        tau = 0.140
+        alpha = 1.0 - np.exp(
+            -float(self.brain.dt) / tau
         )
+
+        for name, group in self.motor_groups.items():
+            fraction = self._fraction_fired(
+                fired,
+                group,
+            )
+            observed_hz = (
+                fraction
+                / max(float(self.brain.dt), 1e-6)
+            )
+            self._motor_rates[name] += (
+                observed_hz
+                - self._motor_rates[name]
+            ) * alpha
+
+        def decode(
+            name: str,
+            baseline_hz: float,
+            span_hz: float,
+        ) -> float:
+            return float(
+                np.clip(
+                    (
+                        self._motor_rates[name]
+                        - baseline_hz
+                    )
+                    / span_hz,
+                    0.0,
+                    1.0,
+                )
+            )
+
         return MotorActivity(
-            forward_left=value("forward_L"),
-            forward_right=value("forward_R"),
-            steer_left=value("steer_L"),
-            steer_right=value("steer_R"),
-            escape_left=value("escape_L"),
-            escape_right=value("escape_R"),
-            backward_left=value("backward_L"),
-            backward_right=value("backward_R"),
+            forward_left=decode(
+                "forward_L", 3.0, 18.0
+            ),
+            forward_right=decode(
+                "forward_R", 3.0, 18.0
+            ),
+            steer_left=decode(
+                "steer_L", 4.0, 18.0
+            ),
+            steer_right=decode(
+                "steer_R", 4.0, 18.0
+            ),
+            escape_left=decode(
+                "escape_L", 10.0, 24.0
+            ),
+            escape_right=decode(
+                "escape_R", 10.0, 24.0
+            ),
+            backward_left=decode(
+                "backward_L", 3.0, 18.0
+            ),
+            backward_right=decode(
+                "backward_R", 3.0, 18.0
+            ),
         )
 
     def _finish_step(
