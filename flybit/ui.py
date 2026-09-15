@@ -190,6 +190,8 @@ class FlyOverlay(QWidget):
         self.heading = 0.0
         self.airborne = True
         self.drive = 0.0
+        self.gait_phase = 0.0
+        self.altitude = 0.0
         self._wing_phase = 0.0
 
         self.setFixedSize(48, 40)
@@ -212,10 +214,14 @@ class FlyOverlay(QWidget):
         heading: float,
         airborne: bool,
         drive: float,
+        gait_phase: float = 0.0,
+        altitude: float = 0.0,
     ) -> None:
         self.heading = heading
         self.airborne = airborne
         self.drive = max(0.0, min(1.0, drive))
+        self.gait_phase = float(gait_phase) % 1.0
+        self.altitude = max(0.0, float(altitude))
         self._wing_phase = (
             self._wing_phase
             + (0.55 if airborne else 0.08)
@@ -236,16 +242,22 @@ class FlyOverlay(QWidget):
             math.degrees(self.heading)
         )
 
-        # Soft shadow gives the 40 px body separation from bright windows.
+        # Shadow fades with virtual altitude while remaining on the same screen
+        # plane. Altitude is depth, never monitor-Y gravity.
+        shadow_alpha = max(
+            18,
+            min(65, int(65 - self.altitude * 0.40)),
+        )
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(
-            QBrush(QColor(0, 0, 0, 65))
+            QBrush(QColor(0, 0, 0, shadow_alpha))
         )
         painter.drawEllipse(
             QRectF(-13, -5, 30, 15)
         )
 
-        # Six legs.
+        # Six legs use an alternating tripod gait while grounded. This is only
+        # body rendering derived from biomechanics; it never selects movement.
         leg_pen = QPen(
             QColor(35, 28, 22, 235),
             1.35,
@@ -254,18 +266,25 @@ class FlyOverlay(QWidget):
             Qt.PenCapStyle.RoundCap
         )
         painter.setPen(leg_pen)
-        for root_x, root_y, end_x, end_y in (
-            (-5, -4, -15, -12),
-            (1, -5, -3, -16),
-            (7, -4, 17, -11),
-            (-5, 4, -15, 12),
-            (1, 5, -3, 16),
-            (7, 4, 17, 11),
+        stride = (
+            math.sin(self.gait_phase * 2.0 * math.pi)
+            * 3.2
+            * self.drive
+            if not self.airborne
+            else 0.0
+        )
+        for root_x, root_y, end_x, end_y, phase_sign in (
+            (-5, -4, -15, -12, 1.0),
+            (1, -5, -3, -16, -1.0),
+            (7, -4, 17, -11, 1.0),
+            (-5, 4, -15, 12, -1.0),
+            (1, 5, -3, 16, 1.0),
+            (7, 4, 17, 11, -1.0),
         ):
             painter.drawLine(
                 root_x,
                 root_y,
-                end_x,
+                int(round(end_x + phase_sign * stride)),
                 end_y,
             )
 
@@ -1149,7 +1168,9 @@ class ControlPanel(QWidget):
             f"acceleration {biomechanics.acceleration:.1f}px/s² · "
             f"turn {biomechanics.turn_rate:.2f}rad/s · "
             f"gait {biomechanics.gait_phase:.2f} · "
-            f"wingbeat {biomechanics.wingbeat_hz:.0f}Hz"
+            f"wingbeat {biomechanics.wingbeat_hz:.0f}Hz · "
+            f"altitude {biomechanics.altitude:.1f} · "
+            f"vertical {biomechanics.vertical_speed:+.1f}"
         )
 
     def append_log(self, message: str) -> None:
@@ -1375,6 +1396,7 @@ class FlybitWindow(QObject):
                 )
 
         body = self.kinematics.state
+        bio = self.kinematics.biomechanics()
         self.fly.set_pose(
             heading=body.heading,
             airborne=body.airborne,
@@ -1383,6 +1405,8 @@ class FlybitWindow(QObject):
                 self.latest_motor.escape,
                 self.latest_motor.flight,
             ),
+            gait_phase=bio.gait_phase,
+            altitude=bio.altitude,
         )
         self._position_overlay()
 
