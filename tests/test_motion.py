@@ -60,6 +60,7 @@ class MotionBridgeTest(unittest.TestCase):
             )
 
         self.assertTrue(body.airborne)
+        self.assertGreater(body.altitude, 0.0)
         self.assertGreater(body.x, 200.0)
         self.assertTrue(
             any(
@@ -67,6 +68,41 @@ class MotionBridgeTest(unittest.TestCase):
                 for event in events
             )
         )
+
+    def test_flight_lands_via_virtual_altitude_not_screen_y(self):
+        body = FlyBodyState(
+            x=300.0,
+            y=240.0,
+            heading=0.0,
+        )
+        model = FlyKinematics(body)
+
+        for _ in range(8):
+            model.update(
+                MotorActivity(
+                    escape_left=1.0,
+                    escape_right=1.0,
+                ),
+                [],
+                (0.0, 0.0, 800.0, 600.0),
+                dt=0.020,
+            )
+
+        takeoff_y = body.y
+        self.assertTrue(body.airborne)
+        self.assertGreater(body.altitude, 0.0)
+
+        for _ in range(260):
+            model.update(
+                MotorActivity(),
+                [],
+                (0.0, 0.0, 800.0, 600.0),
+                dt=0.020,
+            )
+
+        self.assertFalse(body.airborne)
+        self.assertAlmostEqual(body.altitude, 0.0, delta=0.001)
+        self.assertAlmostEqual(body.y, takeoff_y, delta=40.0)
 
     def test_dng02_extends_existing_flight(self):
         body = FlyBodyState(
