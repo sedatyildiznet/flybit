@@ -544,6 +544,9 @@ class ControlPanel(QWidget):
         self.escape = self._motor_row(
             overview_layout, "Escape · DNp01"
         )
+        self.flight = self._motor_row(
+            overview_layout, "Flight thrust · DNg02"
+        )
         self.backward = self._motor_row(
             overview_layout, "Backward · MDN"
         )
@@ -823,6 +826,7 @@ class ControlPanel(QWidget):
             min(100, int(abs(snap.motor.steering) * 100))
         )
         self.escape.setValue(min(100, int(snap.motor.escape * 100)))
+        self.flight.setValue(min(100, int(snap.motor.flight * 100)))
         self.backward.setValue(min(100, int(snap.motor.backward * 100)))
 
     def update_care(
@@ -1016,6 +1020,7 @@ class FlybitWindow(QObject):
             drive=max(
                 self.latest_motor.forward,
                 self.latest_motor.escape,
+                self.latest_motor.flight,
             ),
         )
         self._position_overlay()
