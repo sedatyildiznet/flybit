@@ -111,6 +111,8 @@ jobs:
         run: |
           python -m compileall -q flybrain flybit tests
           python -m unittest discover -s tests -v
+          $env:QT_QPA_PLATFORM="offscreen"
+          python -c "from PySide6.QtWidgets import QApplication; from flybit.ui import FlyOverlay, ControlPanel; app=QApplication([]); fly=FlyOverlay(); panel=ControlPanel(); print('Qt desktop shell OK')"
 
       - name: Build Flybit.exe
         shell: pwsh

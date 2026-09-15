@@ -1,7 +1,8 @@
 """Biological control boundary for Flybit.
 
-World state is encoded only as sensory input. MaleCNS neural dynamics determine
-all downstream activity; this module does not choose behaviours.
+World state enters only through sensory transduction. MaleCNS activity is then
+read out as neural telemetry and identified descending-neuron motor channels.
+No mouse/window rule selects a movement here.
 """
 from __future__ import annotations
 
@@ -11,6 +12,8 @@ import numpy as np
 
 from flybrain import FlyBrain
 from flybrain.eyes import Blob, Eyes
+
+from .motion import MotorActivity
 
 
 @dataclass(frozen=True)
@@ -23,10 +26,24 @@ class NeuralSnapshot:
     photoreceptor_rms: float
     lamina_rms: float
     visual_center: float
+    visual_half_width: float
+    motor: MotorActivity
+    active_brain_points: tuple[tuple[float, float], ...]
 
 
 class FlybitNeuralCore:
     """One independent MaleCNS simulation for the desktop organism."""
+
+    MOTOR_FALLBACKS = {
+        "forward_L": (["DNg100"], "L"),
+        "forward_R": (["DNg100"], "R"),
+        "steer_L": (["DNa02"], "L"),
+        "steer_R": (["DNa02"], "R"),
+        "escape_L": (["DNp01"], "L"),
+        "escape_R": (["DNp01"], "R"),
+        "backward_L": (["MDN"], "L"),
+        "backward_R": (["MDN"], "R"),
+    }
 
     def __init__(
         self,
@@ -62,6 +79,21 @@ class FlybitNeuralCore:
             self.visual_projection
         ] = True
 
+        self.motor_groups: dict[str, np.ndarray] = {}
+        for name, (types, side) in self.MOTOR_FALLBACKS.items():
+            group = self.brain.groups.get(name)
+            if group is None or len(group) == 0:
+                group = self.brain.cells(
+                    types,
+                    side=side,
+                )
+            self.motor_groups[name] = np.asarray(
+                group,
+                dtype=np.int64,
+            )
+
+        self._brain_xy = self._normalize_brain_positions()
+
     @property
     def device(self) -> str:
         return self.brain.device
@@ -91,32 +123,156 @@ class FlybitNeuralCore:
             )
         )
 
+    def _normalize_brain_positions(self) -> np.ndarray:
+        positions = self.brain.positions
+        result = np.full(
+            (self.brain.n, 2),
+            np.nan,
+            dtype=np.float32,
+        )
+        if positions is None or len(positions) != self.brain.n:
+            return result
+
+        raw = np.asarray(
+            positions[:, :2],
+            dtype=np.float64,
+        )
+        valid = np.all(np.isfinite(raw), axis=1)
+        if not np.any(valid):
+            return result
+
+        values = raw[valid]
+        lo = np.percentile(values, 1.0, axis=0)
+        hi = np.percentile(values, 99.0, axis=0)
+        span = np.maximum(hi - lo, 1.0)
+        normalized = np.clip(
+            (values - lo) / span,
+            0.0,
+            1.0,
+        )
+        result[valid] = normalized.astype(np.float32)
+        return result
+
+    def brain_layout(
+        self,
+        max_points: int = 3200,
+    ) -> tuple[tuple[float, float], ...]:
+        valid = np.flatnonzero(
+            np.all(
+                np.isfinite(self._brain_xy),
+                axis=1,
+            )
+        )
+        if len(valid) == 0:
+            return ()
+
+        stride = max(
+            1,
+            int(np.ceil(len(valid) / max_points)),
+        )
+        chosen = valid[::stride][:max_points]
+        return tuple(
+            (
+                float(self._brain_xy[index, 0]),
+                float(self._brain_xy[index, 1]),
+            )
+            for index in chosen
+        )
+
+    def _active_points(
+        self,
+        fired: np.ndarray,
+        max_points: int = 180,
+    ) -> tuple[tuple[float, float], ...]:
+        if fired.size == 0:
+            return ()
+
+        valid = fired[
+            np.all(
+                np.isfinite(self._brain_xy[fired]),
+                axis=1,
+            )
+        ]
+        if valid.size == 0:
+            return ()
+
+        stride = max(
+            1,
+            int(np.ceil(valid.size / max_points)),
+        )
+        chosen = valid[::stride][:max_points]
+        return tuple(
+            (
+                float(self._brain_xy[index, 0]),
+                float(self._brain_xy[index, 1]),
+            )
+            for index in chosen
+        )
+
+    @staticmethod
+    def _fraction_fired(
+        fired: np.ndarray,
+        group: np.ndarray,
+    ) -> float:
+        if fired.size == 0 or group.size == 0:
+            return 0.0
+        hits = np.count_nonzero(
+            np.isin(
+                fired,
+                group,
+                assume_unique=False,
+            )
+        )
+        return float(hits / max(1, group.size))
+
+    def _motor_activity(
+        self,
+        fired: np.ndarray,
+    ) -> MotorActivity:
+        value = lambda name: self._fraction_fired(
+            fired,
+            self.motor_groups[name],
+        )
+        return MotorActivity(
+            forward_left=value("forward_L"),
+            forward_right=value("forward_R"),
+            steer_left=value("steer_L"),
+            steer_right=value("steer_R"),
+            escape_left=value("escape_L"),
+            escape_right=value("escape_R"),
+            backward_left=value("backward_L"),
+            backward_right=value("backward_R"),
+        )
+
     def step_visual_target(
         self,
         center: float | None,
+        half_width: float = 0.035,
     ) -> NeuralSnapshot:
-        """Advance one neural timestep from the raw desktop visual target.
+        """Advance one neural timestep from a raw visual object.
 
-        No looming/target/threat classifier is used. A dark blob is rendered
-        into the compound-eye scene, converted into signed adapting
-        photoreceptor contrast, then passed through the mixed graded/spiking
-        MaleCNS network.
+        center and half_width describe retinal geometry only. No looming,
+        target, threat or behaviour classifier is used.
         """
         blobs: list[Blob] = []
         visual_center = 0.0
+        visual_half_width = 0.0
 
         if center is not None:
             visual_center = float(
+                np.clip(center, -1.0, 1.0)
+            )
+            visual_half_width = float(
                 np.clip(
-                    center,
-                    -1.0,
-                    1.0,
+                    half_width,
+                    0.008,
+                    0.75,
                 )
             )
             blobs.append(
                 Blob(
                     center=visual_center,
-                    half_width=0.035,
+                    half_width=visual_half_width,
                     darkness=1.0,
                 )
             )
@@ -172,9 +328,7 @@ class FlybitNeuralCore:
 
         return NeuralSnapshot(
             step=int(self.brain.steps),
-            total_spikes=int(
-                fired_np.size
-            ),
+            total_spikes=int(fired_np.size),
             descending_spikes=descending_spikes,
             descending_active=descending_active,
             visual_projection_spikes=(
@@ -183,4 +337,9 @@ class FlybitNeuralCore:
             photoreceptor_rms=photoreceptor_rms,
             lamina_rms=lamina_rms,
             visual_center=visual_center,
+            visual_half_width=visual_half_width,
+            motor=self._motor_activity(fired_np),
+            active_brain_points=self._active_points(
+                fired_np
+            ),
         )

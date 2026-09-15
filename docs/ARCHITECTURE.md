@@ -99,3 +99,33 @@ There is still no scripted locomotion.
 ## Scientific honesty
 
 MaleCNS is a measured wiring diagram. Flybit is still a computational nervous-system model, not a complete biological brain emulation. Receptor-specific effects, many graded cell types, neuromodulation, detailed dendritic integration, muscle/body coupling and plasticity remain incomplete.
+
+
+## Desktop body bridge
+
+The current Windows organism uses a deliberately small 2-D kinematic decoder. It does not inspect the cursor or window state to select behaviour.
+
+Measured/identified descending-neuron groups provide the motor signal:
+
+- `DNg100` -> forward locomotor drive
+- `DNa02` -> differential steering
+- `DNp01` -> escape / take-off impulse
+- `MDN` -> backward locomotor drive
+
+The environment contributes only physical quantities: gravity, drag, desktop boundaries and visible Win32 window top edges as collision/landing surfaces.
+
+Cursor approach is represented only as retinal geometry. Its angular size increases as physical distance decreases. There is no `mouse_near -> escape` rule.
+
+The mapping from descending-neuron firing to 2-D forces is still a model-defined motor decoder, not a complete fly musculoskeletal model. That distinction is surfaced in the UI and documentation.
+
+## Desktop UI
+
+Normal mode contains only a small always-on-top fly overlay. Clicking the organism opens the neural control panel. The panel displays:
+
+- sampled MaleCNS EM-position brain map
+- current spiking activity overlay
+- R1-R8 / L1-L3 graded visual telemetry
+- DNg100, DNa02, DNp01 and MDN motor channels
+- short neural/body event log
+
+The panel is observational. It does not provide movement commands.

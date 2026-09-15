@@ -31,7 +31,10 @@ Flybit currently:
 - keeps the remaining network on the upstream spiking dynamics
 - does **not** use the `FeatureDetectors` shortcut in the desktop organism path
 - exposes retina, lamina, visual-projection and descending-neuron telemetry
-- does **not** fake locomotion before a biological motor/body bridge exists
+- decodes identified descending neurons into a 2-D desktop body: DNg100 forward, DNa02 steering, DNp01 escape/take-off and MDN backward
+- treats visible Win32 window top edges as physical landing surfaces
+- shows only the fly during normal use; clicking it opens a live neural control panel with brain map, motor channels and short logs
+- persists desktop position/heading across launches
 - builds a Windows executable through GitHub Actions
 - runs a separate real-MaleCNS graded-vision validation workflow
 
@@ -57,7 +60,11 @@ pip install -e ".[desktop]"
 python -m flybit
 ```
 
-Move the mouse across the display. Its position is rendered as a dark target in the compound-eye scene. Flybit converts that scene to adapting photoreceptor contrast and passes it through the mixed graded/spiking MaleCNS network.
+During normal use Flybit appears as a small always-on-top fly moving around the desktop. The mouse cursor is projected into retinal coordinates; as it approaches, its retinal angular size grows. Cursor distance never calls an escape routine directly. If the visual network produces DNp01 escape output, the body decoder generates the take-off impulse.
+
+Visible top-level Windows provide physical top-edge surfaces, so the body can fall onto and walk across application windows. Click the fly to open the neural control panel. Right-click it for panel and exit actions.
+
+The current body is a 2-D kinematic motor decoder, not yet a complete musculoskeletal Drosophila simulation.
 
 ## Validation
 
@@ -77,8 +84,8 @@ python scripts/validate_graded_vision.py
 
 1. Neural foundation and reproducible Windows builds
 2. Graded early visual-system modelling and validation
-3. MaleCNS/VNC motor output to biomechanical Drosophila body
-4. Closed-loop desktop movement with no behaviour controller
+3. Identified MaleCNS descending-neuron output to a 2-D desktop body
+4. Replace the kinematic body with a fuller biomechanical Drosophila body while preserving the closed loop
 5. Olfactory, gustatory and mechanosensory world inputs
 6. Mushroom-body learning where experimentally supportable
 7. Persistent neural/plastic state across launches
