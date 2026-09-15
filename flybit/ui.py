@@ -701,7 +701,9 @@ class ControlPanel(QWidget):
 
         self.feed_button = QPushButton("Place sugar…")
         self.feed_button.setObjectName("primary")
-        self.feed_button.clicked.connect(self.feed_requested.emit)
+        self.feed_button.clicked.connect(
+            lambda _checked=False: self.feed_requested.emit()
+        )
         care_layout.addWidget(self.feed_button)
 
         self.taste_status = QLabel(
