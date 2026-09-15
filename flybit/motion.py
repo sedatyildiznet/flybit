@@ -244,24 +244,50 @@ class FlyKinematics:
         min_y = top + self.BODY_HALF_HEIGHT
         max_y = bottom - self.BODY_HALF_HEIGHT
 
-        # Screen edges are containment only. We remove the outward velocity
-        # component instead of reflecting heading, eliminating edge spin loops.
-        if s.x < min_x:
+        # Screen edges are physical containment. If the body crosses a wall,
+        # reflect only the wall-normal heading component once. This prevents a
+        # fly from remaining pinned against a corner while avoiding the old
+        # repeated bounce/spin loop.
+        hit_left = s.x < min_x
+        hit_right = s.x > max_x
+        hit_top = s.y < min_y
+        hit_bottom = s.y > max_y
+
+        if hit_left:
             s.x = min_x
             if s.vx < 0.0:
-                s.vx = 0.0
-        elif s.x > max_x:
+                s.vx = abs(s.vx) * 0.28
+            s.heading = math.atan2(
+                math.sin(s.heading),
+                abs(math.cos(s.heading)),
+            )
+        elif hit_right:
             s.x = max_x
             if s.vx > 0.0:
-                s.vx = 0.0
+                s.vx = -abs(s.vx) * 0.28
+            s.heading = math.atan2(
+                math.sin(s.heading),
+                -abs(math.cos(s.heading)),
+            )
 
-        if s.y < min_y:
+        if hit_top:
             s.y = min_y
             if s.vy < 0.0:
-                s.vy = 0.0
-        elif s.y > max_y:
+                s.vy = abs(s.vy) * 0.28
+            s.heading = math.atan2(
+                abs(math.sin(s.heading)),
+                math.cos(s.heading),
+            )
+        elif hit_bottom:
             s.y = max_y
             if s.vy > 0.0:
-                s.vy = 0.0
+                s.vy = -abs(s.vy) * 0.28
+            s.heading = math.atan2(
+                -abs(math.sin(s.heading)),
+                math.cos(s.heading),
+            )
+
+        if hit_left or hit_right or hit_top or hit_bottom:
+            s.angular_velocity *= 0.25
 
         return events
