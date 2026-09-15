@@ -46,6 +46,7 @@ Flybit currently:
 - tracks wall-clock age, finite modeled lifespan, metabolic energy, vitality and stable individual phenotype
 - makes activity, boldness and curiosity alter global neural arousal/intrinsic activity without directly choosing a direction or action
 - persists a user-chosen organism name; naming is available only from the Life tab of the control panel
+- maintains modeled circadian wake drive and persistent sleep pressure; these reduce/increase global neural arousal instead of issuing a scripted sleep command
 - adds semantic desktop perception for cursor, windows, native buttons and recognized applications such as Chrome
 - reports biomechanical telemetry including speed, acceleration, turn rate, gait phase, wingbeat rate and locomotor load
 - builds a Windows executable through GitHub Actions
