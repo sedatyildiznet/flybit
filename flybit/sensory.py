@@ -32,6 +32,8 @@ class SensoryDynamics:
     mechanosensory_disturbance: float
     optic_flow: float
     ambient_luminance: float
+    retinal_loom_left: float
+    retinal_loom_right: float
 
 
 class DesktopMotionModel:
@@ -55,6 +57,38 @@ class DesktopMotionModel:
     @staticmethod
     def _clamp01(value: float) -> float:
         return max(0.0, min(1.0, float(value)))
+
+    @staticmethod
+    def _retinal_loom(
+        previous: np.ndarray | None,
+        current: np.ndarray,
+    ) -> tuple[float, float]:
+        """Estimate left/right dark-edge expansion from raw panorama frames.
+
+        This is a modeled visual-motion transducer. It sees only luminance
+        changes, never cursor identity or semantic desktop labels.
+        """
+        if previous is None:
+            return 0.0, 0.0
+        prev = np.asarray(previous, dtype=np.float32).reshape(-1)
+        cur = np.asarray(current, dtype=np.float32).reshape(-1)
+        if len(prev) != len(cur) or len(cur) < 16:
+            return 0.0, 0.0
+
+        growth = np.maximum(
+            (1.0 - cur) - (1.0 - prev),
+            0.0,
+        )
+        half = len(growth) // 2
+
+        def score(values: np.ndarray) -> float:
+            if values.size == 0:
+                return 0.0
+            k = max(4, min(16, values.size // 20))
+            strongest = np.partition(values, -k)[-k:]
+            return float(np.clip(strongest.mean() * 2.8, 0.0, 1.0))
+
+        return score(growth[:half]), score(growth[half:])
 
     @staticmethod
     def _optic_flow(
@@ -174,6 +208,10 @@ class DesktopMotionModel:
         )
 
         lum = np.asarray(luminance, dtype=np.float32).reshape(-1)
+        retinal_loom_left, retinal_loom_right = self._retinal_loom(
+            self._last_luminance,
+            lum,
+        )
         optic_flow = self._optic_flow(self._last_luminance, lum, dt)
         ambient_luminance = float(np.clip(lum.mean(), 0.0, 1.0))
 
@@ -200,4 +238,6 @@ class DesktopMotionModel:
             mechanosensory_disturbance=mechanosensory_disturbance,
             optic_flow=optic_flow,
             ambient_luminance=ambient_luminance,
+            retinal_loom_left=retinal_loom_left,
+            retinal_loom_right=retinal_loom_right,
         )
