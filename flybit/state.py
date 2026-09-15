@@ -20,6 +20,10 @@ class FlybitState:
     hunger: float = 0.35
     feedings: int = 0
     last_feed_at: str | None = None
+    panel_x: int | None = None
+    panel_y: int | None = None
+    panel_w: int | None = None
+    panel_h: int | None = None
     schema: int = STATE_SCHEMA
 
     @classmethod
@@ -66,6 +70,10 @@ def load_state() -> FlybitState:
                 "hunger",
                 "feedings",
                 "last_feed_at",
+                "panel_x",
+                "panel_y",
+                "panel_w",
+                "panel_h",
                 "schema",
             }
             state = FlybitState(
