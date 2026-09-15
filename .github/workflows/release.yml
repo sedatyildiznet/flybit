@@ -14,6 +14,9 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
 
     steps:
       - name: Checkout
@@ -34,10 +37,12 @@ jobs:
           print(match.group(1))
           PY
           )
+
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid version: $VERSION"
             exit 1
           fi
+
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
@@ -67,11 +72,64 @@ jobs:
             EXTRA+=(--prerelease)
           fi
 
-          gh release create "$TAG"             --target "$GITHUB_SHA"             --title "Flybit $TAG"             --generate-notes             "${EXTRA[@]}"
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "Flybit $TAG" \
+            --generate-notes \
+            "${EXTRA[@]}"
 
-      - name: Release already exists
+      - name: Reuse existing release
         if: steps.exists.outputs.exists == 'true'
         shell: bash
         env:
           TAG: ${{ steps.version.outputs.tag }}
-        run: echo "$TAG already exists; nothing to publish."
+        run: echo "$TAG already exists; executable asset will be rebuilt and replaced."
+
+  build-windows-release:
+    needs: publish
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install runtime and packaging dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[desktop]" "pyinstaller>=6.11,<7"
+
+      - name: Compile and neural unit tests
+        shell: pwsh
+        run: |
+          python -m compileall -q flybrain flybit tests
+          python -m unittest discover -s tests -v
+
+      - name: Build Flybit.exe
+        shell: pwsh
+        run: pyinstaller --clean --noconfirm Flybit.spec
+
+      - name: Package Windows x64
+        shell: pwsh
+        run: Compress-Archive -Path dist/Flybit/* -DestinationPath Flybit-Windows-x64.zip -Force
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Flybit-Windows-x64-${{ needs.publish.outputs.version }}
+          path: Flybit-Windows-x64.zip
+          if-no-files-found: error
+
+      - name: Attach executable to GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.publish.outputs.tag }}
+        run: gh release upload "$env:TAG" Flybit-Windows-x64.zip --clobber
