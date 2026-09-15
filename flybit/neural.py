@@ -1,12 +1,12 @@
 """Biological control boundary for Flybit.
 
-This module deliberately contains no behaviour rules. World state is encoded as
-sensory input, the MaleCNS network is stepped, and only measured neural activity
-is exposed to the rest of the application.
+World state is encoded only as sensory input. MaleCNS neural dynamics determine
+all downstream activity; this module does not choose behaviours.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 import numpy as np
 
 from flybrain import FlyBrain
@@ -19,24 +19,48 @@ class NeuralSnapshot:
     total_spikes: int
     descending_spikes: int
     descending_active: int
+    visual_projection_spikes: int
+    photoreceptor_rms: float
+    lamina_rms: float
     visual_center: float
 
 
 class FlybitNeuralCore:
-    """Owns one independent MaleCNS simulation.
+    """One independent MaleCNS simulation for the desktop organism."""
 
-    v0.1 intentionally uses the upstream raw photoreceptor route rather than
-    FeatureDetectors. The current upstream LIF model is known to lose much of
-    this signal in the graded early visual pathway; Flybit reports that honestly
-    instead of bypassing the eye with scripted behaviour.
-    """
-
-    def __init__(self, *, device: str = "auto", seed: int = 64) -> None:
-        self.brain = FlyBrain(device=device, seed=seed)
+    def __init__(
+        self,
+        *,
+        device: str = "auto",
+        seed: int = 64,
+    ) -> None:
+        self.brain = FlyBrain(
+            device=device,
+            seed=seed,
+            graded_visual=True,
+        )
         self.eyes = Eyes(self.brain.azimuth)
-        self.descending = self.brain.cells(["descending_neuron"])
-        self._descending_mask = np.zeros(self.brain.n, dtype=np.bool_)
+
+        self.descending = self.brain.cells(
+            ["descending_neuron"]
+        )
+        self.visual_projection = self.brain.cells(
+            ["visual_projection"]
+        )
+
+        self._descending_mask = np.zeros(
+            self.brain.n,
+            dtype=np.bool_,
+        )
         self._descending_mask[self.descending] = True
+
+        self._visual_projection_mask = np.zeros(
+            self.brain.n,
+            dtype=np.bool_,
+        )
+        self._visual_projection_mask[
+            self.visual_projection
+        ] = True
 
     @property
     def device(self) -> str:
@@ -46,33 +70,117 @@ class FlybitNeuralCore:
     def neuron_count(self) -> int:
         return int(self.brain.n)
 
-    def step_visual_target(self, center: float | None) -> NeuralSnapshot:
-        """Advance one biological timestep from a raw visual target.
+    @property
+    def graded_cell_count(self) -> int:
+        return int(len(self.brain.graded))
 
-        center is azimuth in [-1, 1]. None means an empty field. The target is
-        rendered onto the 6,006 MaleCNS photoreceptors by the upstream eye model.
-        No LC/LPLC feature neurons are injected directly.
+    @staticmethod
+    def _rms(values: np.ndarray) -> float:
+        if values.size == 0:
+            return 0.0
+        return float(
+            np.sqrt(
+                np.mean(
+                    np.square(
+                        values.astype(
+                            np.float64,
+                            copy=False,
+                        )
+                    )
+                )
+            )
+        )
+
+    def step_visual_target(
+        self,
+        center: float | None,
+    ) -> NeuralSnapshot:
+        """Advance one neural timestep from the raw desktop visual target.
+
+        No looming/target/threat classifier is used. A dark blob is rendered
+        into the compound-eye scene, converted into signed adapting
+        photoreceptor contrast, then passed through the mixed graded/spiking
+        MaleCNS network.
         """
         blobs: list[Blob] = []
         visual_center = 0.0
-        if center is not None:
-            visual_center = float(np.clip(center, -1.0, 1.0))
-            blobs.append(Blob(center=visual_center, half_width=0.035, darkness=1.0))
 
-        eye_drive = self.eyes.drive(blobs)
-        fired = self.brain.step(eye_drive=eye_drive)
-        fired_np = np.asarray(fired, dtype=np.int64)
+        if center is not None:
+            visual_center = float(
+                np.clip(
+                    center,
+                    -1.0,
+                    1.0,
+                )
+            )
+            blobs.append(
+                Blob(
+                    center=visual_center,
+                    half_width=0.035,
+                    darkness=1.0,
+                )
+            )
+
+        eye_drive = self.eyes.contrast_drive(
+            blobs,
+            dt=self.brain.dt,
+        )
+        fired = self.brain.step(
+            eye_drive=eye_drive
+        )
+
+        fired_np = np.asarray(
+            fired,
+            dtype=np.int64,
+        )
+
         if fired_np.size:
-            descending_spikes = int(self._descending_mask[fired_np].sum())
-            descending_active = int(np.unique(fired_np[self._descending_mask[fired_np]]).size)
+            descending_hits = (
+                self._descending_mask[fired_np]
+            )
+            visual_hits = (
+                self._visual_projection_mask[
+                    fired_np
+                ]
+            )
+            descending_spikes = int(
+                descending_hits.sum()
+            )
+            descending_active = int(
+                np.unique(
+                    fired_np[descending_hits]
+                ).size
+            )
+            visual_projection_spikes = int(
+                visual_hits.sum()
+            )
         else:
             descending_spikes = 0
             descending_active = 0
+            visual_projection_spikes = 0
+
+        photoreceptor_rms = self._rms(
+            self.brain.membrane_values(
+                ["R1-6", "R7", "R8"]
+            )
+        )
+        lamina_rms = self._rms(
+            self.brain.membrane_values(
+                ["L1", "L2", "L3"]
+            )
+        )
 
         return NeuralSnapshot(
             step=int(self.brain.steps),
-            total_spikes=int(fired_np.size),
+            total_spikes=int(
+                fired_np.size
+            ),
             descending_spikes=descending_spikes,
             descending_active=descending_active,
+            visual_projection_spikes=(
+                visual_projection_spikes
+            ),
+            photoreceptor_rms=photoreceptor_rms,
+            lamina_rms=lamina_rms,
             visual_center=visual_center,
         )
