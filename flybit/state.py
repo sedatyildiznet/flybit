@@ -7,13 +7,14 @@ import json
 from pathlib import Path
 
 
-STATE_SCHEMA = 3
+STATE_SCHEMA = 4
 
 
 @dataclass
 class FlybitState:
     created_at: str
     launches: int = 0
+    display_name: str = "Flybit"
     x: float | None = None
     y: float | None = None
     heading: float = 0.0
@@ -49,8 +50,15 @@ def _path() -> Path:
     return state_dir() / "state.json"
 
 
+def normalize_display_name(value: str | None) -> str:
+    """Return a safe, compact organism name for persistent UI identity."""
+    text = " ".join(str(value or "").split()).strip()
+    return (text[:32] or "Flybit")
+
+
 def save_state(state: FlybitState) -> None:
     state.hunger = max(0.0, min(1.0, float(state.hunger)))
+    state.display_name = normalize_display_name(state.display_name)
     state.schema = STATE_SCHEMA
     _path().write_text(
         json.dumps(asdict(state), indent=2),
@@ -69,6 +77,7 @@ def load_state() -> FlybitState:
             allowed = {
                 "created_at",
                 "launches",
+                "display_name",
                 "x",
                 "y",
                 "heading",
@@ -101,6 +110,9 @@ def load_state() -> FlybitState:
                 state.x = None
                 state.y = None
                 state.heading = 0.0
+            state.display_name = normalize_display_name(
+                getattr(state, "display_name", "Flybit")
+            )
             state.schema = STATE_SCHEMA
         except (
             OSError,
