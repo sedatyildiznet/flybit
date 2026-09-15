@@ -25,6 +25,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
+    icon="build/flybit.ico",
 )
 coll = COLLECT(
     exe,

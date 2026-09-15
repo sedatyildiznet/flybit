@@ -23,6 +23,8 @@ class MotorActivity:
     escape_right: float = 0.0
     backward_left: float = 0.0
     backward_right: float = 0.0
+    flight_left: float = 0.0
+    flight_right: float = 0.0
 
     @property
     def forward(self) -> float:
@@ -39,6 +41,10 @@ class MotorActivity:
     @property
     def steering(self) -> float:
         return self.steer_right - self.steer_left
+
+    @property
+    def flight(self) -> float:
+        return 0.5 * (self.flight_left + self.flight_right)
 
 
 @dataclass
@@ -67,6 +73,7 @@ class FlyKinematics:
       DNa02  -> steering differential
       DNp01  -> escape/flight burst
       MDN    -> backward locomotor drive
+      DNg02  -> flight thrust / wing-power drive
 
     No cursor/window state is read here. The entire desktop is one flat plane.
     Window contents are visual sensory input, not separate gravity surfaces.
@@ -170,6 +177,12 @@ class FlyKinematics:
 
         self._escape_prev = self._escape
 
+        if motor.flight > 0.04 and s.airborne:
+            s.flight_energy = max(
+                s.flight_energy,
+                0.18 + 0.55 * motor.flight,
+            )
+
         if s.flight_energy > 0.0:
             s.flight_energy = max(
                 0.0,
@@ -190,7 +203,8 @@ class FlyKinematics:
         walk_drive = self._forward - self._backward
         if s.airborne:
             speed_target = (
-                walk_drive * 220.0
+                walk_drive * 180.0
+                + motor.flight * 360.0
                 + self._escape * 760.0
             )
             response_tau = 0.055
@@ -230,24 +244,50 @@ class FlyKinematics:
         min_y = top + self.BODY_HALF_HEIGHT
         max_y = bottom - self.BODY_HALF_HEIGHT
 
-        # Screen edges are containment only. We remove the outward velocity
-        # component instead of reflecting heading, eliminating edge spin loops.
-        if s.x < min_x:
+        # Screen edges are physical containment. If the body crosses a wall,
+        # reflect only the wall-normal heading component once. This prevents a
+        # fly from remaining pinned against a corner while avoiding the old
+        # repeated bounce/spin loop.
+        hit_left = s.x < min_x
+        hit_right = s.x > max_x
+        hit_top = s.y < min_y
+        hit_bottom = s.y > max_y
+
+        if hit_left:
             s.x = min_x
             if s.vx < 0.0:
-                s.vx = 0.0
-        elif s.x > max_x:
+                s.vx = abs(s.vx) * 0.28
+            s.heading = math.atan2(
+                math.sin(s.heading),
+                abs(math.cos(s.heading)),
+            )
+        elif hit_right:
             s.x = max_x
             if s.vx > 0.0:
-                s.vx = 0.0
+                s.vx = -abs(s.vx) * 0.28
+            s.heading = math.atan2(
+                math.sin(s.heading),
+                -abs(math.cos(s.heading)),
+            )
 
-        if s.y < min_y:
+        if hit_top:
             s.y = min_y
             if s.vy < 0.0:
-                s.vy = 0.0
-        elif s.y > max_y:
+                s.vy = abs(s.vy) * 0.28
+            s.heading = math.atan2(
+                abs(math.sin(s.heading)),
+                math.cos(s.heading),
+            )
+        elif hit_bottom:
             s.y = max_y
             if s.vy > 0.0:
-                s.vy = 0.0
+                s.vy = -abs(s.vy) * 0.28
+            s.heading = math.atan2(
+                -abs(math.sin(s.heading)),
+                math.cos(s.heading),
+            )
+
+        if hit_left or hit_right or hit_top or hit_bottom:
+            s.angular_velocity *= 0.25
 
         return events

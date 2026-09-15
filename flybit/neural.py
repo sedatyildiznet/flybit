@@ -39,10 +39,19 @@ class FlybitNeuralCore:
         "forward_R": (["DNg100"], "R"),
         "steer_L": (["DNa02"], "L"),
         "steer_R": (["DNa02"], "R"),
+        "steer1_L": (["DNa01"], "L"),
+        "steer1_R": (["DNa01"], "R"),
         "escape_L": (["DNp01"], "L"),
         "escape_R": (["DNp01"], "R"),
         "backward_L": (["MDN"], "L"),
         "backward_R": (["MDN"], "R"),
+        # Optional 2026 forward-walking modulatory population. This group is
+        # used only when the MaleCNS annotation actually contains the type.
+        "dopa_L": (["DopaMeander"], "L"),
+        "dopa_R": (["DopaMeander"], "R"),
+        # MaleCNS splits DNg02 into subtypes such as DNg02_a/c/g.
+        "flight_L": (["DNg02*"], "L"),
+        "flight_R": (["DNg02*"], "R"),
     }
 
     def __init__(
@@ -83,7 +92,7 @@ class FlybitNeuralCore:
         for name, (types, side) in self.MOTOR_FALLBACKS.items():
             group = self.brain.groups.get(name)
             if group is None or len(group) == 0:
-                group = self.brain.cells(
+                group = self._resolve_cells(
                     types,
                     side=side,
                 )
@@ -97,6 +106,55 @@ class FlybitNeuralCore:
             name: 0.0
             for name in self.motor_groups
         }
+
+    def _resolve_cells(
+        self,
+        types: list[str],
+        *,
+        side: str | None = None,
+    ) -> np.ndarray:
+        """Resolve exact MaleCNS types and optional prefix patterns.
+
+        A trailing "*" means "all flywireType subtypes with this prefix".
+        This matters for descending populations such as DNg02, represented in
+        MaleCNS as DNg02_a, DNg02_c, DNg02_g, ... rather than one exact type.
+        """
+        exact = [
+            value
+            for value in types
+            if not value.endswith("*")
+        ]
+        prefixes = [
+            value[:-1]
+            for value in types
+            if value.endswith("*")
+        ]
+
+        mask = np.zeros(self.brain.n, dtype=np.bool_)
+        if exact:
+            mask |= np.isin(
+                self.brain.cell_type,
+                exact,
+            )
+
+        if prefixes:
+            names = np.asarray(
+                self.brain.cell_type,
+                dtype=str,
+            )
+            for prefix in prefixes:
+                mask |= np.char.startswith(
+                    names,
+                    prefix,
+                )
+
+        if side:
+            mask &= np.asarray(
+                self.brain.side,
+                dtype=str,
+            ) == side
+
+        return np.flatnonzero(mask).astype(np.int64)
 
     @property
     def device(self) -> str:
@@ -275,30 +333,96 @@ class FlybitNeuralCore:
                 )
             )
 
+        # DNg100 remains the primary forward-walking command. DNa01/DNa02
+        # activity also contributes locomotor drive because bilateral
+        # activation of these steering DNs increases walking. Their left/right
+        # difference is still decoded separately as steering.
+        dng_l = decode("forward_L", 1.2, 12.0)
+        dng_r = decode("forward_R", 1.2, 12.0)
+
+        dna02_l = decode("steer_L", 1.5, 14.0)
+        dna02_r = decode("steer_R", 1.5, 14.0)
+        dna01_l = decode("steer1_L", 1.5, 14.0)
+        dna01_r = decode("steer1_R", 1.5, 14.0)
+
+        dna_l = max(dna01_l, dna02_l)
+        dna_r = max(dna01_r, dna02_r)
+        dna_locomotor = 0.32 * (dna_l + dna_r)
+
+        dopa_l = decode("dopa_L", 1.0, 10.0)
+        dopa_r = decode("dopa_R", 1.0, 10.0)
+        dopa_drive = 0.35 * (dopa_l + dopa_r)
+
+        forward_l = float(
+            np.clip(
+                dng_l + dna_locomotor + dopa_drive,
+                0.0,
+                1.0,
+            )
+        )
+        forward_r = float(
+            np.clip(
+                dng_r + dna_locomotor + dopa_drive,
+                0.0,
+                1.0,
+            )
+        )
+
+        escape_l_spike = (
+            self._fraction_fired(
+                fired,
+                self.motor_groups["escape_L"],
+            )
+            > 0.0
+        )
+        escape_r_spike = (
+            self._fraction_fired(
+                fired,
+                self.motor_groups["escape_R"],
+            )
+            > 0.0
+        )
+
         return MotorActivity(
-            forward_left=decode(
-                "forward_L", 3.0, 18.0
+            forward_left=forward_l,
+            forward_right=forward_r,
+            steer_left=float(
+                np.clip(
+                    0.65 * dna02_l + 0.35 * dna01_l,
+                    0.0,
+                    1.0,
+                )
             ),
-            forward_right=decode(
-                "forward_R", 3.0, 18.0
+            steer_right=float(
+                np.clip(
+                    0.65 * dna02_r + 0.35 * dna01_r,
+                    0.0,
+                    1.0,
+                )
             ),
-            steer_left=decode(
-                "steer_L", 4.0, 18.0
+            # One Giant Fiber / DNp01 action potential is sufficient for the
+            # fast escape take-off, so do not hide it behind a rate threshold.
+            escape_left=(
+                1.0
+                if escape_l_spike
+                else decode("escape_L", 0.8, 7.0)
             ),
-            steer_right=decode(
-                "steer_R", 4.0, 18.0
-            ),
-            escape_left=decode(
-                "escape_L", 10.0, 24.0
-            ),
-            escape_right=decode(
-                "escape_R", 10.0, 24.0
+            escape_right=(
+                1.0
+                if escape_r_spike
+                else decode("escape_R", 0.8, 7.0)
             ),
             backward_left=decode(
-                "backward_L", 3.0, 18.0
+                "backward_L", 1.5, 14.0
             ),
             backward_right=decode(
-                "backward_R", 3.0, 18.0
+                "backward_R", 1.5, 14.0
+            ),
+            flight_left=decode(
+                "flight_L", 1.2, 14.0
+            ),
+            flight_right=decode(
+                "flight_R", 1.2, 14.0
             ),
         )
 

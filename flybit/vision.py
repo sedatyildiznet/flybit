@@ -48,6 +48,7 @@ class DesktopRetinaSampler:
         y: float,
         heading: float,
         cursor: QPoint | None = None,
+        food: tuple[float, float, float] | None = None,
     ) -> np.ndarray:
         """Return luminance in [0, 1] for angular bins around the fly.
 
@@ -100,15 +101,15 @@ class DesktopRetinaSampler:
                 else 0.9
             )
 
-        # Windows screen capture normally omits the hardware cursor. Add its
-        # retinal silhouette as a sensory image, not as a behaviour command.
-        if cursor is not None:
-            dx = float(cursor.x()) - x
-            dy = float(cursor.y()) - y
-            distance = max(
-                1.0,
-                math.hypot(dx, dy),
-            )
+        def overlay_object(
+            ox: float,
+            oy: float,
+            radius: float,
+            luminance: float,
+        ) -> None:
+            dx = float(ox) - x
+            dy = float(oy) - y
+            distance = max(1.0, math.hypot(dx, dy))
             bearing = math.atan2(dy, dx)
             relative = (
                 bearing - heading + math.pi
@@ -118,8 +119,7 @@ class DesktopRetinaSampler:
                 0.40,
                 max(
                     0.006,
-                    math.atan2(14.0, distance)
-                    / math.pi,
+                    math.atan2(radius, distance) / math.pi,
                 ),
             )
             delta = np.abs(
@@ -127,7 +127,33 @@ class DesktopRetinaSampler:
                     self.azimuth - center + 1.0
                 ) % 2.0 - 1.0
             )
-            values[delta <= half_width] *= 0.08
+            mask = delta <= half_width
+            values[mask] = np.minimum(
+                values[mask],
+                np.float32(luminance),
+            )
+
+        # Windows screen capture normally omits the hardware cursor. Add its
+        # retinal silhouette as a sensory image, not as a behaviour command.
+        if cursor is not None:
+            overlay_object(
+                float(cursor.x()),
+                float(cursor.y()),
+                14.0,
+                0.07,
+            )
+
+        # Flybit's sugar drop is another world object. We explicitly render its
+        # retinal silhouette so visibility does not depend on whether the OS
+        # includes our transparent overlay window in screen capture.
+        if food is not None:
+            fx, fy, fr = food
+            overlay_object(
+                float(fx),
+                float(fy),
+                max(2.0, float(fr)),
+                0.38,
+            )
 
         return np.clip(
             values,
