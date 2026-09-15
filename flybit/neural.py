@@ -7,6 +7,7 @@ No mouse/window rule selects movement here.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -14,6 +15,7 @@ from flybrain import FlyBrain
 from flybrain.eyes import Blob, Eyes
 
 from .motion import MotorActivity
+from .state import state_dir
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,7 @@ class FlybitNeuralCore:
         *,
         device: str = "auto",
         seed: int = 64,
+        persistent_state: bool = False,
     ) -> None:
         self.brain = FlyBrain(
             device=device,
@@ -117,6 +120,13 @@ class FlybitNeuralCore:
         self._rest_drive = 0.0
         self._base_tonic = float(self.brain.tonic)
         self._base_noise_hz = float(self.brain.noise_hz)
+        self._persistent_path: Path | None = (
+            state_dir() / "neural_state.npz"
+            if persistent_state
+            else None
+        )
+        if self._persistent_path is not None:
+            self.load_persistent_state()
 
     def set_homeostasis(
         self,
@@ -210,6 +220,109 @@ class FlybitNeuralCore:
             ) == side
 
         return np.flatnonzero(mask).astype(np.int64)
+
+    @staticmethod
+    def _to_host(array) -> np.ndarray:
+        if hasattr(array, "get"):
+            array = array.get()
+        return np.asarray(array)
+
+    def load_persistent_state(self) -> bool:
+        """Restore dynamic neural state for the same persistent organism.
+
+        Connectome weights are never loaded from this file. This persists
+        membrane/adaptation dynamics only, not invented synaptic plasticity.
+        """
+        path = self._persistent_path
+        if path is None or not path.exists():
+            return False
+        try:
+            with np.load(path, allow_pickle=False) as saved:
+                v = np.asarray(saved["v"], dtype=np.float32)
+                adaptation = np.asarray(
+                    saved["eye_adaptation"],
+                    dtype=np.float32,
+                )
+                rates = np.asarray(
+                    saved["motor_rates"],
+                    dtype=np.float64,
+                )
+                steps = int(saved["steps"][0])
+
+            if v.shape != tuple(self.brain.v.shape):
+                return False
+            if adaptation.shape != self.eyes.adaptation.shape:
+                return False
+            names = sorted(self._motor_rates)
+            if rates.shape != (len(names),):
+                return False
+            if not np.all(np.isfinite(v)):
+                return False
+            if not np.all(np.isfinite(adaptation)):
+                return False
+
+            self.brain.v = self.brain.xp.asarray(
+                v,
+                dtype=self.brain.xp.float32,
+            )
+            self.brain.fired = self.brain.xp.empty(
+                0,
+                self.brain.xp.int64,
+            )
+            self.brain.steps = max(0, steps)
+            if self.brain.graded_visual and len(self.brain.graded):
+                clipped = self.brain.xp.clip(
+                    self.brain.v[self.brain._graded],
+                    -np.float32(self.brain.graded_clip),
+                    np.float32(self.brain.graded_clip),
+                )
+                self.brain.graded_output = self.brain.xp.tanh(
+                    clipped / np.float32(self.brain.graded_scale)
+                )
+            self.eyes.adaptation = np.clip(
+                adaptation,
+                0.01,
+                1.0,
+            ).astype(np.float32)
+            for name, rate in zip(names, rates):
+                self._motor_rates[name] = max(0.0, float(rate))
+            return True
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+
+    def save_persistent_state(self) -> bool:
+        """Atomically persist dynamic neural state for the next launch."""
+        path = self._persistent_path
+        if path is None:
+            return False
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            names = sorted(self._motor_rates)
+            tmp = path.with_suffix(".tmp")
+            with tmp.open("wb") as stream:
+                np.savez_compressed(
+                    stream,
+                    v=self._to_host(self.brain.v).astype(
+                        np.float32,
+                        copy=False,
+                    ),
+                    eye_adaptation=np.asarray(
+                        self.eyes.adaptation,
+                        dtype=np.float32,
+                    ),
+                    motor_rates=np.asarray(
+                        [self._motor_rates[name] for name in names],
+                        dtype=np.float64,
+                    ),
+                    steps=np.asarray(
+                        [int(self.brain.steps)],
+                        dtype=np.int64,
+                    ),
+                )
+            tmp.replace(path)
+            return True
+        except OSError:
+            return False
 
     @property
     def device(self) -> str:
