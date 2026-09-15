@@ -1,136 +1,891 @@
 # Flybit
 
-**Flybit is a desktop organism powered by the Drosophila MaleCNS connectome.**
+<p align="center">
+  <strong>A connectome-driven desktop organism for Windows.</strong><br>
+  Flybit turns the Drosophila MaleCNS connectome into a persistent creature that sees, reacts, moves, rests and survives on your desktop.
+</p>
 
-The project is built from [alextitonis/fly.ai](https://github.com/alextitonis/fly.ai) and keeps one rule above everything else:
+<p align="center">
+  <a href="https://github.com/sedatyildiznet/flybit/releases/tag/v0.2.0"><img alt="Release" src="https://img.shields.io/badge/release-v0.2.0-2ea44f"></a>
+  <img alt="Status" src="https://img.shields.io/badge/status-stable-2ea44f">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows-0078D4">
+  <img alt="Python" src="https://img.shields.io/badge/python-3.10%2B-3776AB">
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-blue"></a>
+</p>
 
-> The application must not choose biological behaviour for the fly.
+---
 
-The intended loop is:
+## What is Flybit?
 
+Flybit is an experimental **desktop organism** built around the public **Drosophila MaleCNS v1.0 connectome**.
+
+It is not a scripted desktop pet and it is not an LLM choosing actions for a sprite.
+
+The central rule of the project is:
+
+> **Application code must not choose biological behaviour on behalf of the organism.**
+
+The intended control loop is always:
+
+```text
+DESKTOP WORLD
+      ↓
+SENSORY TRANSDUCTION
+      ↓
+MALECNS NEURAL DYNAMICS
+      ↓
+DESCENDING / MOTOR OUTPUT
+      ↓
+BODY PHYSICS
+      ↓
+DESKTOP WORLD
 ```
-desktop world
-  -> sensory transduction
-  -> MaleCNS neural dynamics
-  -> motor nervous system
-  -> body physics
-  -> desktop world
+
+Flybit therefore avoids shortcuts such as:
+
+```python
+if mouse_is_near:
+    escape()
+
+if hungry:
+    move_to_food()
 ```
 
-No `if mouse_near: escape()`, no scripted wandering presented as neural behaviour, and no LLM directly controlling movement.
+Mouse approach, light, movement, hunger, fatigue and other state changes must influence the organism through sensory or physiological layers rather than directly selecting the action.
 
-## Current state
+---
 
-Flybit currently:
+## v0.2.0 Stable
 
-- loads the full MaleCNS network used by `fly.ai`
-- runs 166,700 neurons and 25,582,938 measured connectome connections
-- projects the desktop scene into 6,006 MaleCNS photoreceptors
-- models R1-6, R7, R8 and L1/L2/L3 as graded visual cells
-- propagates their signed analog state through the measured MaleCNS connections
-- keeps the remaining network on the upstream spiking dynamics
-- does **not** use the upstream task-oriented `FeatureDetectors` shortcut in the desktop organism path
-- derives left/right temporal looming from raw luminance expansion and applies that modeled optic-lobe cue only to identified LPLC2 visual-projection cells; descending motor neurons are never stimulated directly
-- exposes retina, lamina, visual-projection and descending-neuron telemetry
-- decodes identified descending neurons into a 2-D desktop body: DNg100 + DNa01/DNa02 walking, DNa01/DNa02 steering, DNp01 escape/take-off, DNg02 flight thrust and MDN backward
-- treats screen x/y as a flat desktop locomotion plane and uses a separate virtual altitude axis for take-off/flight/landing; gravity never pulls the fly toward the bottom of the monitor
-- shows only the fly during normal use; clicking it opens a live neural control panel with brain map, motor channels and short logs
-- migrates old edge-stranded state safely, then persists desktop position/heading and control-panel geometry across launches
-- samples raw desktop pixels rather than only tracking the cursor
-- runs the desktop retina on a 20 ms target cadence using a local retinal capture region instead of copying the full screen
-- tracks temporal cursor kinematics (distance, speed, acceleration, closing speed, angular growth and time-to-collision) plus whole-field optic flow as sensory/debug telemetry
-- lets the cursor create genuine retinal looming through its changing angular extent; no mouse-distance escape rule is used
-- smooths descending-neuron firing into short-window motor rates to prevent single-spike spin artifacts
-- includes a branded application/EXE icon and a native resizable tabbed Windows control panel
-- includes persistent Care state and physical sugar-drop feeding
-- models a bilateral sugar-associated odor field at virtual antenna positions and displays its gradient/salience; neural olfactory injection stays disabled until receptor identities are validated
-- exposes hunger as an internal homeostatic drive that modulates neural locomotor readiness without choosing direction
-- tracks wall-clock age, finite modeled lifespan, metabolic energy, vitality and stable individual phenotype
-- makes activity, boldness and curiosity alter global neural arousal/intrinsic activity without directly choosing a direction or action
-- persists a user-chosen organism name; naming is available only from the Life tab of the control panel
-- maintains modeled circadian wake drive and persistent sleep pressure; these reduce/increase global neural arousal instead of issuing a scripted sleep command
-- adds short-term retinal looming habituation and DN-escape-driven sensitization; neither mechanism issues a direct motor command
-- adds semantic desktop perception for cursor, windows, native buttons and recognized applications such as Chrome
-- scans visible native window rectangles with Win32 Z-order and uses them as grounded substrate/contact context; window identity never selects movement
-- reports biomechanical telemetry including speed, acceleration, turn rate, gait phase, wingbeat rate and locomotor load
-- builds a Windows executable through GitHub Actions
-- runs a separate real-MaleCNS graded-vision validation workflow
+**v0.2.0 is the first stable Flybit release.**
 
-The mixed visual model fixes a structural limitation of the upstream all-spiking approximation, but it is still not a complete biophysical simulation. The graded time constants and transfer scale are computational parameters, not fitted membrane models.
+This release combines the neural desktop foundation with the persistent-organism layer introduced during the alpha series.
 
-## Windows
+Major additions include:
 
-Every published GitHub Release triggers the Windows workflow and attaches:
+- 50 Hz target desktop retinal sampling
+- raw-luminance temporal looming
+- LPLC2 visual-motion transduction
+- cursor velocity, acceleration, closing-speed and TTC telemetry
+- optic-flow observation
+- short-term visual habituation
+- escape-driven sensitization
+- persistent neural membrane/adaptation state
+- 2.5-D flight with an independent altitude axis
+- grounded tripod-gait rendering
+- native Win32 window substrate/contact awareness
+- hunger, energy, ageing and individual phenotype
+- modeled circadian wake/rest physiology
+- bilateral synthetic food-odor telemetry
+- persistent organism naming from the control panel
+- explicit **Measured / Modeled / Synthetic** provenance in the UI
+- real-MaleCNS validation in CI
 
+Latest stable release:
+
+**[Download Flybit v0.2.0](https://github.com/sedatyildiznet/flybit/releases/tag/v0.2.0)**
+
+---
+
+## Why this project exists
+
+A normal desktop pet follows authored behaviour:
+
+```text
+timer -> random choice -> animation
 ```
+
+Flybit is trying to explore a different idea:
+
+```text
+environment -> senses -> nervous system -> motor output -> body
+```
+
+The goal is not to fake intelligence with more state-machine branches. The goal is to make the organism increasingly dependent on the same kind of closed sensory-motor loop that makes a biological animal responsive to its environment.
+
+That does **not** mean Flybit is a literal living fly or a complete brain emulation. It means the project deliberately preserves the distinction between:
+
+- measured biological data,
+- computational models,
+- synthetic desktop-world physics,
+- and behaviour that actually emerges from the neural loop.
+
+---
+
+# Core system
+
+## MaleCNS neural foundation
+
+Flybit loads the MaleCNS network used by the upstream `fly.ai` project.
+
+Current runtime scale:
+
+| Component | Current Flybit model |
+|---|---:|
+| Neurons | **166,700** |
+| Directed connectome connections | **25,582,938** |
+| Mapped photoreceptors | **6,006** |
+| Desktop retinal panorama | **384 angular bins** |
+| Retinal sampling target | **20 ms / 50 Hz** |
+
+Connection identity, direction, weight and transmitter-derived sign remain grounded in MaleCNS data.
+
+The desktop-organism path does **not** rely on the upstream task-oriented `FeatureDetectors` shortcut for choosing movement.
+
+---
+
+## Mixed graded + spiking vision
+
+Real fly photoreceptors and several early visual neurons are not well represented as ordinary all-or-nothing spiking cells.
+
+Flybit therefore uses a mixed visual model:
+
+```text
+desktop luminance
+      ↓
+signed adapting contrast
+      ↓
+R1-6 / R7 / R8 graded state
+      ↓
+measured MaleCNS connectivity
+      ↓
+L1 / L2 / L3 graded state
+      ↓
+measured MaleCNS connectivity
+      ↓
+downstream spiking network
+```
+
+Currently modeled as graded cells:
+
+- R1-6
+- R7
+- R8
+- L1
+- L2
+- L3
+
+The graded membrane constants and transfer functions are computational parameters. They are **not presented as fitted single-cell biophysical models**.
+
+---
+
+## Desktop retina
+
+Flybit continuously samples the desktop around its own body.
+
+Instead of repeatedly copying the entire monitor, v0.2.0 captures only the local retinal neighbourhood required by the six visual sampling radii.
+
+Visible desktop content can therefore affect retinal input directly:
+
+- windows
+- icons
+- text
+- images
+- video
+- motion
+- the hardware cursor
+- the sugar object
+
+The operating-system cursor is rendered into the retinal panorama because normal desktop capture frequently omits the hardware pointer.
+
+---
+
+## Looming and threat perception
+
+Flybit does not internally receive the command:
+
+> "The mouse is near. Escape."
+
+Instead, temporal visual information is calculated from consecutive retinal observations.
+
+The sensory observer tracks values such as:
+
+- cursor distance
+- cursor speed
+- cursor acceleration
+- relative closing speed
+- angular size
+- angular expansion
+- time-to-collision
+- whole-field optic flow
+
+More importantly, raw luminance frames are compared for **retinal expansion**.
+
+```text
+raw retinal frames
+      ↓
+dark expansion / looming estimate
+      ↓
+left / right modeled visual-motion cue
+      ↓
+identified LPLC2 visual-projection cells
+      ↓
+MaleCNS network
+      ↓
+descending activity
+      ↓
+motor decoder
+```
+
+The modeled boundary targets **LPLC2 visual projection cells**, not descending motor neurons.
+
+Current MaleCNS validation resolves:
+
+- **94 left LPLC2 cells**
+- **91 right LPLC2 cells**
+
+Live LPLC2 activity is visible in the control panel.
+
+---
+
+## Habituation and sensitization
+
+Flybit contains simple short-term adaptive state without turning it into a scripted behaviour tree.
+
+### Habituation
+
+Repeated harmless retinal expansion gradually reduces the modeled looming-transducer gain.
+
+When the stimulus disappears, the response recovers.
+
+A strong stimulus still retains a minimum response.
+
+### Sensitization
+
+When the nervous system itself produces DN escape output, Flybit raises a temporary threat-arousal state.
+
+That state changes general neural readiness; it does not trigger another escape by itself.
+
+```text
+real DN escape output
+      ↓
+temporary threat arousal
+      ↓
+global tonic / noise / readiness modulation
+```
+
+---
+
+# Motor system
+
+## Identified descending outputs
+
+The desktop body is driven from identified MaleCNS motor-related groups.
+
+| Neural group | Flybit interpretation |
+|---|---|
+| `DNg100` | primary forward locomotor drive |
+| `DNa01 / DNa02` | steering + bilateral locomotor contribution |
+| `DNp01` | escape / take-off impulse |
+| `DNg02_*` | sustained flight / wing-power drive |
+| `MDN` | backward locomotion |
+
+Most groups are converted into short-window firing-rate estimates before force mapping.
+
+This prevents a single stochastic spike from turning into a large body movement.
+
+`DNp01` is intentionally different: a single detected Giant Fiber / DNp01 event is preserved as an immediate escape/take-off signal.
+
+---
+
+## 2.5-D body
+
+Flybit is no longer modeled as a sprite that simply moves faster when "airborne".
+
+The body has:
+
+```text
+x
+y
+vx
+vy
+heading
+angular velocity
+altitude
+vertical velocity
+airborne state
+```
+
+Screen `x/y` remain desktop coordinates.
+
+Flight uses a **separate virtual altitude axis**.
+
+This matters because monitor Y is not treated as biological height. Gravity therefore never makes Flybit fall toward the bottom edge of the screen.
+
+### Flight sequence
+
+```text
+DNp01 escape activity
+      ↓
+take-off impulse
+      ↓
+virtual altitude rises
+      ↓
+DNg02 contributes sustained lift
+      ↓
+flight
+      ↓
+lift decays
+      ↓
+altitude returns to desktop plane
+      ↓
+landing
+```
+
+---
+
+## Walking and gait
+
+Grounded movement exposes a locomotor gait phase.
+
+The renderer uses that phase to animate an alternating tripod-style leg pattern.
+
+This gait rendering does not choose movement. It reflects body state that already came from the neural/motor loop.
+
+Biomechanical telemetry includes:
+
+- speed
+- acceleration
+- turn rate
+- gait phase
+- wingbeat estimate
+- locomotor load
+- altitude
+- vertical speed
+- current substrate
+
+---
+
+# The desktop as a world
+
+## Native window substrates
+
+Flybit scans visible top-level Win32 windows and preserves their native Z-order.
+
+When grounded, the organism knows which physical desktop substrate is under its body:
+
+```text
+Air
+Window
+Desktop
+```
+
+Overlapping windows use the topmost visible rectangle.
+
+This information is **physical contact context only**.
+
+Flybit does not become attracted to Chrome because a window title says "Chrome", and window names never issue steering commands.
+
+---
+
+## Semantic perception
+
+Flybit also maintains a separate observer/debug perception stream for coarse OS-level objects such as:
+
+- cursor
+- top-level windows
+- native buttons
+- known application processes
+
+These labels are useful for the human-readable control panel and diagnostics.
+
+They do not bypass the nervous system.
+
+The fly may therefore be displayed as being near a Chrome window while its biological visual path still receives only physical visual quantities such as luminance and motion.
+
+---
+
+# Organism state
+
+## Persistent identity
+
+Flybit is intended to remain the same individual between launches.
+
+Persistent state currently includes parts of:
+
+- birth timestamp
+- organism name
+- desktop position
+- heading
+- panel geometry
+- hunger
+- feeding history
+- energy
+- sleep pressure
+- neural membrane state
+- retinal adaptation
+- recent motor-rate state
+
+The organism name is cosmetic only.
+
+It can be changed **only from the Life tab of the control panel**.
+
+---
+
+## Neural state persistence
+
+Flybit periodically saves dynamic neural state to disk.
+
+Persisted neural information includes:
+
+- membrane values
+- retinal adaptation
+- short motor-rate history
+- neural simulation step state
+
+This does **not** mean Flybit currently has full long-term synaptic learning.
+
+Connectome weights are not silently rewritten and the project does not claim mushroom-body plasticity where none has been implemented.
+
+---
+
+## Hunger and energy
+
+Hunger is an internal homeostatic variable.
+
+It can affect general neural/locomotor readiness, but it does not contain a hidden food-navigation command.
+
+Flybit also tracks:
+
+- metabolic energy
+- vitality
+- feeding count
+- last feeding time
+- age
+- finite modeled lifespan
+
+Age and energy can reduce movement capacity.
+
+---
+
+## Individual phenotype
+
+Each persistent organism has stable modeled traits:
+
+- activity
+- boldness
+- curiosity
+
+These values modulate global neural statistics such as tonic activity, intrinsic noise and arousal.
+
+They do not directly mean:
+
+```text
+bold -> attack
+curious -> move right
+active -> wander
+```
+
+Two Flybit individuals can therefore differ in neural readiness without personality variables becoming a hidden behaviour script.
+
+---
+
+# Feeding
+
+## Physical sugar placement
+
+The **Care** tab lets the user place a sugar drop anywhere on the desktop.
+
+The organism must physically contact it before the feeding event occurs.
+
+```text
+place sugar
+      ↓
+visible world object
+      ↓
+retinal visibility
+      ↓
+physical body contact
+      ↓
+consumption
+      ↓
+hunger / energy update
+```
+
+Feeding count and last-feed time persist across launches.
+
+---
+
+## Modeled food odor
+
+v0.2.0 also includes a synthetic bilateral odor field around the sugar source.
+
+Two virtual antenna positions sample:
+
+- left concentration
+- right concentration
+- bilateral gradient
+- mean concentration
+- hunger-dependent salience
+
+This is deliberately labeled **MODELED / SYNTHETIC**.
+
+The signal is **not yet injected into MaleCNS olfactory neurons**, because the bundled runtime metadata does not currently provide the receptor-level mapping required to make that claim responsibly.
+
+The same rule applies to receptor-accurate gustation and mechanosensation.
+
+---
+
+# Circadian rest
+
+Flybit maintains a modeled rest physiology rather than using:
+
+```python
+if hour > 23:
+    sleep()
+```
+
+The model combines:
+
+- local time
+- broad morning/evening wake peaks
+- ambient retinal luminance
+- homeostatic sleep pressure
+- current locomotor load
+
+The resulting **rest drive** changes general neural tonic/noise/activity.
+
+It never directly calls a sleep, wake, turn or escape action.
+
+A sufficiently strong sensory event can therefore still propagate through the neural system while the organism is in a lower-activity state.
+
+---
+
+# Control panel
+
+Click Flybit to open the native resizable control panel.
+
+The panel is diagnostic and care-oriented; it does not contain manual movement controls.
+
+## Overview
+
+General neural/body activity and current state.
+
+## Brain
+
+Live neural map and spiking activity.
+
+## Care
+
+- hunger
+- feeding history
+- sugar placement
+- modeled bilateral odor field
+
+## Events
+
+Short neural/body event history including take-off, landing and substrate changes.
+
+## Perception
+
+Live diagnostics such as:
+
+- cursor distance
+- cursor velocity
+- closing speed
+- TTC
+- optic flow
+- left/right retinal looming
+- habituation
+- modeled near-field disturbance
+- observer threat salience
+
+## Life
+
+- persistent organism name
+- age
+- lifespan
+- energy
+- vitality
+- activity
+- boldness
+- curiosity
+- sleep pressure
+- circadian wake/rest state
+- biomechanical telemetry
+
+## Model
+
+The Model tab makes the project's scientific boundary explicit.
+
+### MEASURED / DATA-DRIVEN
+
+Examples:
+
+- MaleCNS neuron identities
+- connectome graph
+- connection directions
+- synapse-derived weights
+- transmitter-derived signs
+- mapped photoreceptors
+- identified DN / LPLC2 cell types
+
+### MODELED
+
+Examples:
+
+- graded transfer dynamics
+- retinal looming -> LPLC2 transduction
+- descending-neuron -> body force decoding
+- altitude / lift / gravity
+- gait rendering
+- hunger / circadian / phenotype modulation
+
+### SYNTHETIC WORLD / TELEMETRY
+
+Examples:
+
+- desktop sugar object
+- odor field
+- semantic window/application labels
+- TTC observer
+- threat-salience observer
+- near-field disturbance observer
+
+### NOT CLAIMED
+
+Flybit does not currently claim:
+
+- complete biological brain emulation
+- full musculoskeletal Drosophila physics
+- receptor-accurate taste
+- receptor-accurate olfaction
+- receptor-accurate mechanosensation
+- complete hormonal physiology
+- complete synaptic plasticity
+- literal artificial life in the biological sense
+
+---
+
+# Installation
+
+## Windows stable release
+
+Use the latest stable release:
+
+**[Flybit v0.2.0](https://github.com/sedatyildiznet/flybit/releases/tag/v0.2.0)**
+
+The Windows package is produced by GitHub Actions as:
+
+```text
 Flybit-Windows-x64.zip
 └── Flybit.exe
 ```
 
-The connectome data is not bundled into the executable. On first launch, the neural core may download about 260 MB of prebuilt MaleCNS-derived data.
+The MaleCNS-derived runtime data is distributed separately from the executable. On first launch the neural core may need to download roughly **260 MB** of prebuilt data.
+
+---
 
 ## Run from source
 
-```bash
+### Requirements
+
+- Python 3.10+
+- Windows for the full desktop-organism experience
+- Git
+- internet access on the first neural-data setup
+
+### Setup
+
+```powershell
+git clone https://github.com/sedatyildiznet/flybit.git
+cd flybit
+
 python -m venv .venv
 .venv\Scripts\activate
+
+python -m pip install --upgrade pip
 pip install -e ".[desktop]"
+
 python -m flybit
 ```
 
-During normal use Flybit appears as a small always-on-top fly moving across the desktop plane. The screen is sampled as raw luminance rays around the fly (384 angular bins across six radii) on a 20 ms target cadence and interpolated onto the MaleCNS photoreceptors. The sampler captures only the local retinal neighbourhood needed by those rays, avoiding repeated full-screen copies. The retinal path has no OCR, cursor identity or semantic threat classifier. A modeled temporal-motion boundary detects dark retinal expansion from consecutive raw luminance frames and transduces it into identified LPLC2 visual-projection cells; all downstream propagation remains in MaleCNS. A separate OS-level semantic perception layer labels coarse desktop entities (cursor, windows, native Win32 buttons and common applications) for sensory context and telemetry; labels never map directly to movement commands.
+---
 
-Windows, icons, text, images, video and other visible screen content can therefore change retinal input directly. The hardware cursor is added as a retinal silhouette because normal screen capture often omits it. Its angular extent grows naturally as it approaches Flybit, producing a temporal looming stimulus in the same retinal stream. Cursor distance, TTC and the observer threat score are telemetry only and never call an escape routine directly. A near-field disturbance value is also measured, but is intentionally not injected into MaleCNS until receptor-level mechanosensory mapping is validated.
+# Validation
 
-A single DNp01/Giant Fiber spike is preserved as an immediate escape/take-off signal instead of being averaged away by a rate threshold. DNg02 MaleCNS subtypes provide sustained flight-thrust activity. DNg100 remains the primary forward-walking read-out, while bilateral DNa01/DNa02 activity contributes locomotor drive as well as steering. MDN provides backward drive.
+Flybit includes both deterministic unit tests and validation against real MaleCNS-derived runtime data.
 
-Click the fly to open the native resizable control panel. It contains Overview, Brain, Care, Events, Perception and Life tabs. The Perception tab exposes temporal cursor/looming/TTC/optic-flow diagnostics. The persistent organism name can be changed only from the Life tab. Only the Windows title-bar close button is shown; closing the panel hides it without terminating the organism. The panel size and position persist across launches.
-
-The current body is a 2.5-D kinematic motor decoder: x/y are desktop coordinates while altitude/vertical velocity are independent flight state. Visible native window rectangles are refreshed from Win32 and the topmost rectangle under the grounded body is reported as its current substrate; outside a window the support is the desktop plane. Grounded rendering uses an alternating tripod gait derived from locomotor telemetry. It is still not a complete musculoskeletal Drosophila simulation.
-
-## Feeding
-
-The Care tab can place a visible sugar drop anywhere on the desktop. Placement uses a temporary full-desktop click layer; the fly must physically contact the drop before it is consumed. Hunger, feeding count and last-feed time persist across launches.
-
-Food is also rendered into the retinal panorama. Hunger is now represented as an internal homeostatic drive: it increases neural locomotor readiness and interacts with metabolic vitality, but it still does not directly steer the fly toward food. Exact sweet-receptor/gustatory-neuron injection is intentionally disabled until receptor-level identity is available in the bundled MaleCNS metadata.
-
-## Validation
-
-Run the deterministic tests:
+## Unit tests
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-With the MaleCNS data available, validate both the early visual relay and the real motor groups/decoder:
+Coverage includes areas such as:
+
+- hunger and physical feeding
+- circadian pressure
+- neural visual relay
+- life/energy state
+- motor/body dynamics
+- altitude take-off and landing
+- substrate contact
+- olfactory-world model
+- cursor dynamics
+- optic flow
+- retinal looming
+- habituation
+- persistent identity
+
+---
+
+## Real MaleCNS visual validation
 
 ```bash
 python scripts/validate_graded_vision.py
+```
+
+The validation requires the real early visual relay to produce:
+
+- non-zero photoreceptor state
+- non-zero L1/L2/L3 state
+- non-zero graded current into downstream neurons
+- visual-projection spiking activity
+
+---
+
+## Real MaleCNS motor / looming validation
+
+```bash
 python scripts/validate_motor_groups.py
 ```
 
-The motor validation resolves real MaleCNS DNg02 subtypes, verifies a single DNp01 spike survives as take-off, checks DNa-driven locomotion and DNg02 flight thrust, and runs an end-to-end raw-retina challenge that must produce translational motor output.
+The current validation checks that:
 
-## Roadmap
+- required descending motor groups resolve
+- left/right LPLC2 groups resolve
+- one DNp01 event survives the motor decoder as escape/take-off
+- bilateral DNa activity produces locomotor drive
+- DNg02 activity produces flight drive
+- raw retinal stimulation reaches translational motor output
+- expanding retinal input is distinguishable from a static silhouette
+- expanding input increases LPLC2 activity
+- the expanding challenge reaches DNp01 escape output
 
-1. Neural foundation and reproducible Windows builds
-2. Graded early visual-system modelling and validation
-3. Identified MaleCNS descending-neuron output to a 2-D desktop body
-4. Replace the kinematic body with a fuller biomechanical Drosophila body while preserving the closed loop
-5. Olfactory, gustatory and mechanosensory world inputs
-6. Mushroom-body learning where experimentally supportable
-7. Persistent neural/plastic state across launches
+These validations are also exercised through GitHub Actions.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+---
 
-## Scientific provenance
+# Project architecture
 
-Flybit is a fork/derivative of **fly.ai** by alextitonis, released under the MIT License.
+At a high level:
 
-The MaleCNS v1.0 connectome was produced by FlyEM / HHMI Janelia and collaborators and is distributed separately under its own CC BY 4.0 terms. Flybit does not redistribute the raw connectome in this repository.
+```text
+┌───────────────────────────────────────────────┐
+│               DESKTOP WORLD                   │
+│ windows · pixels · cursor · food · time       │
+└───────────────────────┬───────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────┐
+│                 SENSORY LAYER                 │
+│ retina · temporal loom · optic flow           │
+│ modeled odor · observer telemetry             │
+└───────────────────────┬───────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────┐
+│                  MALECNS                      │
+│ graded early vision + spiking CNS             │
+│ measured connectome connectivity              │
+└───────────────────────┬───────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────┐
+│             DESCENDING OUTPUT                 │
+│ DNg100 · DNa01/02 · DNp01 · DNg02 · MDN      │
+└───────────────────────┬───────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────┐
+│                 BODY MODEL                    │
+│ x/y · heading · gait · altitude · flight      │
+└───────────────────────┬───────────────────────┘
+                        │
+                        └──────────────► WORLD
+```
 
-See [NOTICE.md](NOTICE.md) for attribution details.
+For implementation details and scientific boundaries, see:
 
-## License
+**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
 
-Code in this repository remains under the MIT License unless a file states otherwise. MaleCNS data remains under its original data license.
+---
+
+# What Flybit deliberately does not do
+
+Flybit intentionally avoids several tempting shortcuts.
+
+It does not:
+
+- use an LLM as the fly's brain
+- use computer vision labels to directly select movement
+- run a random-walk routine and call it neural behaviour
+- call `escape()` merely because the cursor is close
+- call `seek_food()` merely because hunger is high
+- pretend synthetic odor is measured olfactory physiology
+- present modeled membrane constants as measured physiology
+- claim a complete biological fly simulation
+
+This constraint is one of the main design goals of the project.
+
+---
+
+# Roadmap
+
+v0.2.0 establishes the persistent sensory-driven organism architecture.
+
+Future work should prioritize biological fidelity over adding more scripted features.
+
+### Body
+
+- richer six-leg biomechanics
+- contact/proprioceptive feedback
+- more realistic take-off and landing transitions
+- grooming and additional motor primitives
+- better flight stabilization
+
+### Sensory systems
+
+- receptor-grounded mechanosensation
+- receptor-grounded olfaction
+- receptor-grounded gustation
+- proprioceptive channels
+
+### Learning
+
+- experimentally supportable mushroom-body pathways
+- dopamine-gated associative learning
+- persistent learned associations
+- stronger behavioral assay suite
+
+### Long-duration organism behavior
+
+- improved circadian validation
+- rest/sleep assays
+- age-related changes
+- multi-hour and multi-day behavioral telemetry
+
+The rule remains the same: **new features should enter the sensory-neural-body loop rather than bypass it.**
+
+---
+
+# Scientific provenance
+
+Flybit is derived from **[alextitonis/fly.ai](https://github.com/alextitonis/fly.ai)**.
+
+The MaleCNS v1.0 connectome was produced by FlyEM / HHMI Janelia and collaborators and is distributed separately under its own terms.
+
+Flybit does not redistribute the raw MaleCNS connectome in this repository.
+
+See **[NOTICE.md](NOTICE.md)** for attribution details.
+
+---
+
+# License
+
+Flybit code is distributed under the **MIT License** unless a file states otherwise.
+
+MaleCNS data remains under its original data license.
+
+See **[LICENSE](LICENSE)**.
