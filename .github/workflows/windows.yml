@@ -1,0 +1,62 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install runtime and packaging dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[desktop]" "pyinstaller>=6.11,<7"
+
+      - name: Compile and smoke test
+        shell: pwsh
+        run: |
+          python -m compileall -q flybrain flybit
+          python -c "import flybrain, flybit; print('Flybit', flybit.__version__)"
+
+      - name: Build Flybit.exe
+        shell: pwsh
+        run: pyinstaller --clean --noconfirm Flybit.spec
+
+      - name: Package Windows x64
+        shell: pwsh
+        run: Compress-Archive -Path dist/Flybit/* -DestinationPath Flybit-Windows-x64.zip -Force
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Flybit-Windows-x64
+          path: Flybit-Windows-x64.zip
+          if-no-files-found: error
+
+      - name: Attach executable to published release
+        if: github.event_name == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" Flybit-Windows-x64.zip --clobber
