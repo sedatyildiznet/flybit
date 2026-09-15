@@ -23,6 +23,8 @@ class MotorActivity:
     escape_right: float = 0.0
     backward_left: float = 0.0
     backward_right: float = 0.0
+    flight_left: float = 0.0
+    flight_right: float = 0.0
 
     @property
     def forward(self) -> float:
@@ -39,6 +41,10 @@ class MotorActivity:
     @property
     def steering(self) -> float:
         return self.steer_right - self.steer_left
+
+    @property
+    def flight(self) -> float:
+        return 0.5 * (self.flight_left + self.flight_right)
 
 
 @dataclass
@@ -67,6 +73,7 @@ class FlyKinematics:
       DNa02  -> steering differential
       DNp01  -> escape/flight burst
       MDN    -> backward locomotor drive
+      DNg02  -> flight thrust / wing-power drive
 
     No cursor/window state is read here. The entire desktop is one flat plane.
     Window contents are visual sensory input, not separate gravity surfaces.
@@ -170,6 +177,12 @@ class FlyKinematics:
 
         self._escape_prev = self._escape
 
+        if motor.flight > 0.04 and s.airborne:
+            s.flight_energy = max(
+                s.flight_energy,
+                0.18 + 0.55 * motor.flight,
+            )
+
         if s.flight_energy > 0.0:
             s.flight_energy = max(
                 0.0,
@@ -190,7 +203,8 @@ class FlyKinematics:
         walk_drive = self._forward - self._backward
         if s.airborne:
             speed_target = (
-                walk_drive * 220.0
+                walk_drive * 180.0
+                + motor.flight * 360.0
                 + self._escape * 760.0
             )
             response_tau = 0.055
