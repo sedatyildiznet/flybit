@@ -967,6 +967,22 @@ class FlybitWindow(QObject):
         self.fly = FlyOverlay()
         self.fly.setWindowIcon(flybit_icon())
         self.panel = ControlPanel()
+        if (
+            self.state.panel_w is not None
+            and self.state.panel_h is not None
+        ):
+            self.panel.resize(
+                max(560, int(self.state.panel_w)),
+                max(600, int(self.state.panel_h)),
+            )
+        if (
+            self.state.panel_x is not None
+            and self.state.panel_y is not None
+        ):
+            self.panel.move(
+                int(self.state.panel_x),
+                int(self.state.panel_y),
+            )
         self.food_overlay = FoodOverlay()
         self.food_placement = FoodPlacementOverlay()
         self.vision = DesktopRetinaSampler()
@@ -1241,15 +1257,19 @@ class FlybitWindow(QObject):
 
         bounds = self._desktop_bounds()
         body = self.kinematics.state
-        x = min(
-            bounds[2] - self.panel.width() - 18,
-            max(bounds[0] + 18, body.x + 35),
-        )
-        y = min(
-            bounds[3] - self.panel.height() - 18,
-            max(bounds[1] + 18, body.y - 80),
-        )
-        self.panel.move(int(x), int(y))
+        if (
+            self.state.panel_x is None
+            or self.state.panel_y is None
+        ):
+            x = min(
+                bounds[2] - self.panel.width() - 18,
+                max(bounds[0] + 18, body.x + 35),
+            )
+            y = min(
+                bounds[3] - self.panel.height() - 18,
+                max(bounds[1] + 18, body.y - 80),
+            )
+            self.panel.move(int(x), int(y))
         self.panel.show()
         self.panel.raise_()
         self.panel.activateWindow()
@@ -1277,6 +1297,11 @@ class FlybitWindow(QObject):
         self.state.x = float(body.x)
         self.state.y = float(body.y)
         self.state.heading = float(body.heading)
+        geom = self.panel.geometry()
+        self.state.panel_x = int(geom.x())
+        self.state.panel_y = int(geom.y())
+        self.state.panel_w = int(geom.width())
+        self.state.panel_h = int(geom.height())
         save_state(self.state)
 
     @Slot()
