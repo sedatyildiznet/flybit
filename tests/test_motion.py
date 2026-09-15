@@ -7,103 +7,117 @@ from flybit.motion import (
     FlyKinematics,
     MotorActivity,
 )
-from flybit.world import Surface
 
 
 class MotionBridgeTest(unittest.TestCase):
-    def test_forward_dn_moves_landed_body(self):
+    def test_forward_dn_moves_on_flat_plane(self):
         body = FlyBodyState(
             x=200.0,
-            y=91.0,
+            y=200.0,
             heading=0.0,
-            landed_surface=1,
         )
         model = FlyKinematics(body)
-        surface = Surface(
-            id=1,
-            left=100.0,
-            right=500.0,
-            top=100.0,
-            title="test window",
-        )
 
-        for _ in range(20):
+        for _ in range(25):
             model.update(
                 MotorActivity(
                     forward_left=1.0,
                     forward_right=1.0,
                 ),
-                [surface],
+                [],
                 (0.0, 0.0, 800.0, 600.0),
                 dt=0.020,
             )
 
         self.assertGreater(body.x, 200.0)
-        self.assertEqual(body.landed_surface, 1)
-        self.assertAlmostEqual(body.y, 91.0, places=4)
+        self.assertAlmostEqual(
+            body.y,
+            200.0,
+            delta=1.0,
+        )
+        self.assertFalse(body.airborne)
 
-    def test_escape_dn_causes_takeoff_without_environment_rule(self):
+    def test_escape_dn_starts_planar_flight_burst(self):
         body = FlyBodyState(
             x=200.0,
-            y=91.0,
+            y=200.0,
             heading=0.0,
-            landed_surface=1,
         )
         model = FlyKinematics(body)
-        surface = Surface(
-            id=1,
-            left=100.0,
-            right=500.0,
-            top=100.0,
-            title="test window",
-        )
 
-        events = model.update(
-            MotorActivity(
-                escape_left=1.0,
-                escape_right=1.0,
-            ),
-            [surface],
-            (0.0, 0.0, 800.0, 600.0),
-            dt=0.020,
-        )
+        events = []
+        for _ in range(8):
+            events.extend(
+                model.update(
+                    MotorActivity(
+                        escape_left=1.0,
+                        escape_right=1.0,
+                    ),
+                    [],
+                    (0.0, 0.0, 800.0, 600.0),
+                    dt=0.020,
+                )
+            )
 
-        self.assertIsNone(body.landed_surface)
-        self.assertLess(body.vy, 0.0)
+        self.assertTrue(body.airborne)
+        self.assertGreater(body.x, 200.0)
         self.assertTrue(
-            any(event.kind == "takeoff" for event in events)
+            any(
+                event.kind == "takeoff"
+                for event in events
+            )
         )
 
-    def test_falling_body_lands_on_window_top(self):
+    def test_no_gravity_drift_without_motor_output(self):
         body = FlyBodyState(
-            x=250.0,
-            y=82.0,
-            heading=0.0,
-            vx=0.0,
-            vy=300.0,
+            x=320.0,
+            y=240.0,
+            heading=1.2,
         )
         model = FlyKinematics(body)
-        surface = Surface(
-            id=7,
-            left=100.0,
-            right=500.0,
-            top=100.0,
-            title="editor",
+
+        for _ in range(100):
+            model.update(
+                MotorActivity(),
+                [],
+                (0.0, 0.0, 800.0, 600.0),
+                dt=0.020,
+            )
+
+        self.assertAlmostEqual(
+            body.x,
+            320.0,
+            delta=0.01,
+        )
+        self.assertAlmostEqual(
+            body.y,
+            240.0,
+            delta=0.01,
         )
 
-        events = model.update(
+    def test_screen_edge_does_not_flip_heading(self):
+        body = FlyBodyState(
+            x=787.0,
+            y=300.0,
+            heading=0.0,
+            vx=300.0,
+        )
+        model = FlyKinematics(body)
+
+        model.update(
             MotorActivity(),
-            [surface],
+            [],
             (0.0, 0.0, 800.0, 600.0),
-            dt=0.040,
+            dt=0.050,
         )
 
-        self.assertEqual(body.landed_surface, 7)
-        self.assertAlmostEqual(body.y, 91.0, places=4)
-        self.assertEqual(body.vy, 0.0)
-        self.assertTrue(
-            any(event.kind == "land" for event in events)
+        self.assertAlmostEqual(
+            body.heading,
+            0.0,
+            delta=0.01,
         )
+        self.assertLessEqual(body.x, 788.0)
+        self.assertGreaterEqual(body.vx, 0.0)
 
 
 if __name__ == "__main__":
