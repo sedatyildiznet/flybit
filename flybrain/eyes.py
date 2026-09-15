@@ -41,7 +41,14 @@ class Eyes:
     def __init__(self, azimuth: np.ndarray):
         self.azimuth = azimuth
         self.previous: np.ndarray | None = None
-        self.adaptation: np.ndarray | None = None
+        # Begin adapted to the neutral background. This makes a cursor/object
+        # already present on the first frame produce retinal contrast instead
+        # of being silently absorbed as the initial baseline.
+        self.adaptation = np.full(
+            len(azimuth),
+            BACKGROUND,
+            dtype=np.float32,
+        )
 
     def drive(self, blobs: list[Blob]) -> np.ndarray:
         """Original fly.ai positive visual drive, retained for compatibility."""
@@ -71,11 +78,10 @@ class Eyes:
         """
         lum = render(self.azimuth, blobs)
 
-        if self.adaptation is None:
-            self.adaptation = lum.copy()
-            return np.zeros_like(lum)
-
-        baseline = np.maximum(self.adaptation, np.float32(0.05))
+        baseline = np.maximum(
+            self.adaptation,
+            np.float32(0.05),
+        )
         contrast = (lum - self.adaptation) / baseline
 
         tau = max(float(adaptation_tau), float(dt), 1e-6)
