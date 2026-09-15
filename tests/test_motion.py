@@ -143,7 +143,7 @@ class MotionBridgeTest(unittest.TestCase):
             delta=0.01,
         )
 
-    def test_screen_edge_does_not_flip_heading(self):
+    def test_screen_edge_reflects_once_without_spin_loop(self):
         body = FlyBodyState(
             x=787.0,
             y=300.0,
@@ -158,14 +158,28 @@ class MotionBridgeTest(unittest.TestCase):
             (0.0, 0.0, 800.0, 600.0),
             dt=0.050,
         )
+        first_heading = body.heading
 
+        for _ in range(40):
+            model.update(
+                MotorActivity(),
+                [],
+                (0.0, 0.0, 800.0, 600.0),
+                dt=0.020,
+            )
+
+        self.assertLessEqual(body.x, 788.0)
+        self.assertLess(body.vx, 5.0)
+        self.assertAlmostEqual(
+            abs(first_heading),
+            3.141592653589793,
+            delta=0.05,
+        )
         self.assertAlmostEqual(
             body.heading,
-            0.0,
-            delta=0.01,
+            first_heading,
+            delta=0.05,
         )
-        self.assertLessEqual(body.x, 788.0)
-        self.assertGreaterEqual(body.vx, 0.0)
 
 
 if __name__ == "__main__":
