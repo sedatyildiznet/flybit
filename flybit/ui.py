@@ -430,8 +430,8 @@ class ControlPanel(QWidget):
             Qt.WindowType.Window
             | Qt.WindowType.WindowStaysOnTopHint
         )
-        self.setMinimumSize(500, 520)
-        self.resize(650, 760)
+        self.setMinimumSize(540, 620)
+        self.resize(680, 780)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -499,9 +499,17 @@ class ControlPanel(QWidget):
         metrics.addWidget(self.step, 0, 3)
         root.addLayout(metrics)
 
+        section_row = QHBoxLayout()
         section = QLabel("LIVE BRAIN MAP")
         section.setObjectName("section")
-        root.addWidget(section)
+        section_row.addWidget(section)
+        section_row.addStretch()
+        self.vision_mode = QLabel(
+            "RAW DESKTOP VISION · 384×6"
+        )
+        self.vision_mode.setObjectName("pill")
+        section_row.addWidget(self.vision_mode)
+        root.addLayout(section_row)
 
         self.brain_map = BrainMapWidget()
         root.addWidget(self.brain_map)
