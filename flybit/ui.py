@@ -70,6 +70,8 @@ class BrainWorker(QObject):
         self._hunger_drive = 0.0
         self._vitality = 1.0
         self._activity_trait = 0.5
+        self._boldness_trait = 0.5
+        self._curiosity_trait = 0.5
 
     @Slot()
     def start(self) -> None:
@@ -124,16 +126,20 @@ class BrainWorker(QObject):
         self._scene_luminance = luminance
         self._scene_azimuth = azimuth
 
-    @Slot(float, float, float)
+    @Slot(float, float, float, float, float)
     def set_homeostasis(
         self,
         hunger_drive: float,
         vitality: float,
         activity_trait: float,
+        boldness_trait: float,
+        curiosity_trait: float,
     ) -> None:
         self._hunger_drive = float(hunger_drive)
         self._vitality = float(vitality)
         self._activity_trait = float(activity_trait)
+        self._boldness_trait = float(boldness_trait)
+        self._curiosity_trait = float(curiosity_trait)
 
     @Slot()
     def _step(self) -> None:
@@ -144,6 +150,8 @@ class BrainWorker(QObject):
                 self._hunger_drive,
                 self._vitality,
                 self._activity_trait,
+                self._boldness_trait,
+                self._curiosity_trait,
             )
             if (
                 self._scene_luminance is not None
@@ -1164,7 +1172,7 @@ class FlybitWindow(QObject):
     """Application controller; only the organism is visible by default."""
 
     scene_changed = Signal(object, object)
-    homeostasis_changed = Signal(float, float, float)
+    homeostasis_changed = Signal(float, float, float, float, float)
 
     def __init__(self) -> None:
         super().__init__()
@@ -1341,6 +1349,8 @@ class FlybitWindow(QObject):
             self.care.homeostatic_drive,
             life.vitality,
             life.activity,
+            life.boldness,
+            life.curiosity,
         )
         bounds = self._desktop_bounds()
         physiology_gain = life.vitality * (0.78 + 0.30 * life.activity)
