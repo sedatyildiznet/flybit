@@ -27,12 +27,11 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Install dependencies
+      - name: Install runtime and packaging dependencies
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-flybit.txt
+          pip install ".[desktop]" "pyinstaller>=6.11,<7"
 
       - name: Compile and smoke test
         shell: pwsh
