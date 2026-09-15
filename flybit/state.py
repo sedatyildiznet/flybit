@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 
-STATE_SCHEMA = 2
+STATE_SCHEMA = 3
 
 
 @dataclass
@@ -20,6 +20,11 @@ class FlybitState:
     hunger: float = 0.35
     feedings: int = 0
     last_feed_at: str | None = None
+    lifespan_days: float | None = None
+    energy: float = 0.82
+    activity_trait: float | None = None
+    boldness_trait: float | None = None
+    curiosity_trait: float | None = None
     panel_x: int | None = None
     panel_y: int | None = None
     panel_w: int | None = None
@@ -70,6 +75,11 @@ def load_state() -> FlybitState:
                 "hunger",
                 "feedings",
                 "last_feed_at",
+                "lifespan_days",
+                "energy",
+                "activity_trait",
+                "boldness_trait",
+                "curiosity_trait",
                 "panel_x",
                 "panel_y",
                 "panel_w",
@@ -85,13 +95,13 @@ def load_state() -> FlybitState:
             )
 
             # alpha.3/alpha.4 could persist a body directly on a screen edge.
-            # The old edge model could then strand the upgraded organism there.
-            # Reset position once when migrating to the new state schema.
-            if old_schema < STATE_SCHEMA:
+            # Reset position only for the legacy locomotion migration. Later
+            # schema upgrades keep the organism's physical location and life.
+            if old_schema < 2:
                 state.x = None
                 state.y = None
                 state.heading = 0.0
-                state.schema = STATE_SCHEMA
+            state.schema = STATE_SCHEMA
         except (
             OSError,
             ValueError,
