@@ -31,6 +31,7 @@ class SensoryDynamics:
     threat_salience: float
     mechanosensory_disturbance: float
     optic_flow: float
+    ambient_luminance: float
 
 
 class DesktopMotionModel:
@@ -174,6 +175,7 @@ class DesktopMotionModel:
 
         lum = np.asarray(luminance, dtype=np.float32).reshape(-1)
         optic_flow = self._optic_flow(self._last_luminance, lum, dt)
+        ambient_luminance = float(np.clip(lum.mean(), 0.0, 1.0))
 
         self._last_time = now
         self._last_cursor = (float(cursor_x), float(cursor_y))
@@ -197,4 +199,5 @@ class DesktopMotionModel:
             threat_salience=threat_salience,
             mechanosensory_disturbance=mechanosensory_disturbance,
             optic_flow=optic_flow,
+            ambient_luminance=ambient_luminance,
         )
