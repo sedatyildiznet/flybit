@@ -125,8 +125,9 @@ class FlybitNeuralCore:
             if persistent_state
             else None
         )
+        self._restored_state = False
         if self._persistent_path is not None:
-            self.load_persistent_state()
+            self._restored_state = self.load_persistent_state()
 
     def set_homeostasis(
         self,
@@ -323,6 +324,10 @@ class FlybitNeuralCore:
             return True
         except OSError:
             return False
+
+    @property
+    def restored_state(self) -> bool:
+        return bool(self._restored_state)
 
     @property
     def device(self) -> str:
