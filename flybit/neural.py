@@ -49,6 +49,8 @@ class FlybitNeuralCore:
         # used only when the MaleCNS annotation actually contains the type.
         "dopa_L": (["DopaMeander"], "L"),
         "dopa_R": (["DopaMeander"], "R"),
+        "flight_L": (["DNg02"], "L"),
+        "flight_R": (["DNg02"], "R"),
     }
 
     def __init__(
@@ -316,6 +318,21 @@ class FlybitNeuralCore:
             )
         )
 
+        escape_l_spike = (
+            self._fraction_fired(
+                fired,
+                self.motor_groups["escape_L"],
+            )
+            > 0.0
+        )
+        escape_r_spike = (
+            self._fraction_fired(
+                fired,
+                self.motor_groups["escape_R"],
+            )
+            > 0.0
+        )
+
         return MotorActivity(
             forward_left=forward_l,
             forward_right=forward_r,
@@ -333,17 +350,29 @@ class FlybitNeuralCore:
                     1.0,
                 )
             ),
-            escape_left=decode(
-                "escape_L", 7.0, 20.0
+            # One Giant Fiber / DNp01 action potential is sufficient for the
+            # fast escape take-off, so do not hide it behind a rate threshold.
+            escape_left=(
+                1.0
+                if escape_l_spike
+                else decode("escape_L", 0.8, 7.0)
             ),
-            escape_right=decode(
-                "escape_R", 7.0, 20.0
+            escape_right=(
+                1.0
+                if escape_r_spike
+                else decode("escape_R", 0.8, 7.0)
             ),
             backward_left=decode(
                 "backward_L", 1.5, 14.0
             ),
             backward_right=decode(
                 "backward_R", 1.5, 14.0
+            ),
+            flight_left=decode(
+                "flight_L", 1.2, 14.0
+            ),
+            flight_right=decode(
+                "flight_R", 1.2, 14.0
             ),
         )
 
