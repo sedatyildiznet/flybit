@@ -31,7 +31,7 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          pip install ".[desktop]" "pyinstaller>=6.11,<7"
+          pip install ".[desktop]" "pyinstaller>=6.11,<7" "pillow>=10,<12"
 
       - name: Compile and neural unit tests
         shell: pwsh
@@ -41,6 +41,10 @@ jobs:
           python -c "import flybrain, flybit; print('Flybit', flybit.__version__)"
           $env:QT_QPA_PLATFORM="offscreen"
           python -c "from PySide6.QtWidgets import QApplication; from flybit.ui import FlyOverlay, ControlPanel; app=QApplication([]); fly=FlyOverlay(); panel=ControlPanel(); print('Qt desktop shell OK')"
+
+      - name: Generate Windows icon
+        shell: pwsh
+        run: python scripts/make_icon.py
 
       - name: Build Flybit.exe
         shell: pwsh
