@@ -128,6 +128,7 @@ class FlybitNeuralCore:
         self._boldness_trait = 0.5
         self._curiosity_trait = 0.5
         self._rest_drive = 0.0
+        self._threat_arousal = 0.0
         self._base_tonic = float(self.brain.tonic)
         self._base_noise_hz = float(self.brain.noise_hz)
         self._persistent_path: Path | None = (
@@ -147,6 +148,7 @@ class FlybitNeuralCore:
         boldness_trait: float = 0.5,
         curiosity_trait: float = 0.5,
         rest_drive: float = 0.0,
+        threat_arousal: float = 0.0,
     ) -> None:
         """Update global physiology without selecting a direction or action.
 
@@ -159,6 +161,9 @@ class FlybitNeuralCore:
         self._boldness_trait = float(np.clip(boldness_trait, 0.0, 1.0))
         self._curiosity_trait = float(np.clip(curiosity_trait, 0.0, 1.0))
         self._rest_drive = float(np.clip(rest_drive, 0.0, 1.0))
+        self._threat_arousal = float(
+            np.clip(threat_arousal, 0.0, 1.0)
+        )
 
         vitality_gain = 0.35 + 0.65 * self._vitality
         tonic_gain = (
@@ -176,11 +181,21 @@ class FlybitNeuralCore:
 
         rest_tonic = 1.0 - 0.62 * self._rest_drive
         rest_noise = 1.0 - 0.52 * self._rest_drive
+        sensitization_tonic = 1.0 + 0.24 * self._threat_arousal
+        sensitization_noise = 1.0 + 0.34 * self._threat_arousal
         self.brain.tonic = self._base_tonic * float(
-            np.clip(tonic_gain * rest_tonic, 0.12, 1.35)
+            np.clip(
+                tonic_gain * rest_tonic * sensitization_tonic,
+                0.12,
+                1.45,
+            )
         )
         self.brain.noise_hz = self._base_noise_hz * float(
-            np.clip(noise_gain * rest_noise, 0.12, 1.65)
+            np.clip(
+                noise_gain * rest_noise * sensitization_noise,
+                0.12,
+                1.85,
+            )
         )
 
     def set_visual_motion(
@@ -564,6 +579,7 @@ class FlybitNeuralCore:
         arousal *= 0.90 + 0.14 * self._curiosity_trait
         arousal *= 0.35 + 0.65 * self._vitality
         arousal *= 1.0 - 0.48 * self._rest_drive
+        arousal *= 1.0 + 0.18 * self._threat_arousal
         forward_l = float(
             np.clip(
                 (dng_l + dna_locomotor + dopa_drive) * arousal,
