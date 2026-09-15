@@ -65,6 +65,16 @@ class MotionEvent:
     detail: str = ""
 
 
+@dataclass(frozen=True)
+class BiomechanicsSnapshot:
+    speed: float
+    acceleration: float
+    turn_rate: float
+    gait_phase: float
+    wingbeat_hz: float
+    locomotor_load: float
+
+
 class FlyKinematics:
     """Planar desktop body model.
 
@@ -89,6 +99,11 @@ class FlyKinematics:
         self._steer = 0.0
         self._escape = 0.0
         self._escape_prev = 0.0
+        self._gait_phase = 0.0
+        self._wingbeat_hz = 0.0
+        self._last_speed = math.hypot(state.vx, state.vy)
+        self._acceleration = 0.0
+        self._locomotor_load = 0.0
 
     @staticmethod
     def _lowpass(
@@ -110,6 +125,7 @@ class FlyKinematics:
         surfaces: list[Surface],
         bounds: tuple[float, float, float, float],
         dt: float = 0.020,
+        physiology_gain: float = 1.0,
     ) -> list[MotionEvent]:
         del surfaces  # retained only for API compatibility
         events: list[MotionEvent] = []
@@ -200,12 +216,13 @@ class FlyKinematics:
                 )
             )
 
-        walk_drive = self._forward - self._backward
+        physiology_gain = max(0.05, min(1.25, float(physiology_gain)))
+        walk_drive = (self._forward - self._backward) * physiology_gain
         if s.airborne:
             speed_target = (
                 walk_drive * 180.0
-                + motor.flight * 360.0
-                + self._escape * 760.0
+                + motor.flight * 360.0 * physiology_gain
+                + self._escape * 760.0 * physiology_gain
             )
             response_tau = 0.055
         else:
@@ -237,6 +254,23 @@ class FlyKinematics:
 
         s.x += s.vx * dt
         s.y += s.vy * dt
+
+        speed = math.hypot(s.vx, s.vy)
+        self._acceleration = (speed - self._last_speed) / max(dt, 1e-6)
+        self._last_speed = speed
+        self._locomotor_load = max(
+            0.0,
+            min(1.0, speed / (520.0 if s.airborne else 170.0)),
+        )
+        if s.airborne:
+            self._wingbeat_hz = 120.0 + 80.0 * max(
+                motor.flight, self._escape
+            )
+        else:
+            self._wingbeat_hz = 0.0
+            self._gait_phase = (
+                self._gait_phase + dt * (1.5 + 8.5 * self._locomotor_load)
+            ) % 1.0
 
         left, top, right, bottom = bounds
         min_x = left + self.BODY_HALF_WIDTH
@@ -291,3 +325,15 @@ class FlyKinematics:
             s.angular_velocity *= 0.25
 
         return events
+
+
+    def biomechanics(self) -> BiomechanicsSnapshot:
+        """Current body telemetry derived from the physical state."""
+        return BiomechanicsSnapshot(
+            speed=float(self._last_speed),
+            acceleration=float(self._acceleration),
+            turn_rate=float(self.state.angular_velocity),
+            gait_phase=float(self._gait_phase),
+            wingbeat_hz=float(self._wingbeat_hz),
+            locomotor_load=float(self._locomotor_load),
+        )
