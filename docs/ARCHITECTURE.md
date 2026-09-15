@@ -187,3 +187,13 @@ Each organism may have a compact persistent display name. The name is cosmetic
 identity only: it has no neural or behavioural effect. It can be edited only
 from the native control panel's Life tab; the fly context menu does not expose
 a rename action.
+
+
+## Circadian rest physiology
+
+Flybit maintains a modeled wake drive with broad morning/evening activity peaks,
+ambient-retina luminance input and persistent homeostatic sleep pressure. The
+resulting rest drive modulates global neural tonic activity, intrinsic noise and
+locomotor readiness. It never calls a sleep, wake, turn or escape action
+directly. The clock shape and timescales are computational approximations rather
+than a complete emulation of the Drosophila circadian network.
