@@ -71,7 +71,7 @@ Two validation levels protect the visual relay:
    - non-zero L1/L2/L3 state,
    - non-zero graded synaptic current leaving the early visual relay.
 
-The test deliberately does not require a specific behavioural output. Behaviour should only be claimed after the motor/body loop is connected and validated.
+A second real-MaleCNS validation checks the motor bridge itself: required descending groups must resolve, a single DNp01 spike must survive as an escape/take-off command, repeated DNa activity must produce locomotor drive, DNg02 subtype activity must produce flight thrust, and a raw-retina moving/expanding target must produce non-zero translational motor output.
 
 ## Desktop visual path
 
@@ -109,16 +109,17 @@ The current Windows organism uses a deliberately small 2-D kinematic decoder. It
 
 Measured/identified descending-neuron groups provide the motor signal:
 
-- `DNg100` -> forward locomotor drive
-- `DNa02` -> differential steering
-- `DNp01` -> escape / take-off impulse
+- `DNg100` -> primary forward locomotor drive
+- `DNa01` / `DNa02` -> differential steering plus bilateral locomotor contribution
+- `DNp01` -> escape / take-off impulse; a single detected spike is preserved
+- `DNg02_*` MaleCNS subtypes -> flight-thrust / wing-power drive
 - `MDN` -> backward locomotor drive
 
 The whole desktop is one flat locomotion plane. The body decoder has planar drag and desktop boundaries, but no downward gravity, falling or window-edge landing physics.
 
 DNp01 starts a short planar flight burst rather than a fake vertical jump. DNa02 is decoded as yaw-only steering, so the rendered body cannot roll or pitch into somersaults.
 
-Descending motor groups are converted to short-window firing-rate estimates before force mapping. This prevents isolated stochastic spikes from becoming full movement commands while preserving sustained neural activity.
+Most descending motor groups are converted to short-window firing-rate estimates before force mapping. This prevents isolated stochastic spikes from becoming full movement commands while preserving sustained neural activity. DNp01 is the exception: Giant Fiber take-off physiology is event-like, so one DNp01 spike is preserved as an immediate escape signal.
 
 Cursor approach and all other visible desktop content enter through the retinal luminance panorama. There is no `mouse_near -> escape` rule.
 
@@ -131,7 +132,14 @@ Normal mode contains only a small always-on-top fly overlay. Clicking the organi
 - sampled MaleCNS EM-position brain map
 - current spiking activity overlay
 - R1-R8 / L1-L3 graded visual telemetry
-- DNg100, DNa02, DNp01 and MDN motor channels
+- DNg100/DNa walking, DNa steering, DNp01 escape, DNg02 flight and MDN backward channels
+- Care state and physical sugar placement
 - short neural/body event log
 
-The panel is observational. It does not provide movement commands.
+The panel does not provide direct movement commands. Feeding changes persistent nutritional state only after physical contact with the desktop sugar object. The food object is visible to the retinal sampler, but hunger is not converted into scripted navigation.
+
+## Care and feeding
+
+Flybit maintains app-level nutritional state: hunger, feeding count and last-feed timestamp. A sugar drop is a real desktop-world object with position and collision radius. Consumption occurs only when the body overlaps the drop.
+
+This is deliberately separated from neural claims. The bundled MaleCNS metadata used by Flybit does not currently expose receptor-level sweet-GRN identity, so Flybit does not pretend to inject a biologically exact sugar taste signal. When a validated receptor/cell mapping is available in the bundled data, gustatory transduction can be added without changing this physical contact model.
