@@ -148,6 +148,11 @@ class BrainWorker(QObject):
         self._rest_drive = float(rest_drive)
 
     @Slot()
+    def persist(self) -> None:
+        if self._core is not None:
+            self._core.save_persistent_state()
+
+    @Slot()
     def _step(self) -> None:
         if self._core is None:
             return
@@ -1217,6 +1222,7 @@ class FlybitWindow(QObject):
 
     scene_changed = Signal(object, object)
     homeostasis_changed = Signal(float, float, float, float, float, float)
+    persist_neural = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -1290,6 +1296,7 @@ class FlybitWindow(QObject):
         self._brain_thread.started.connect(self._worker.start)
         self.scene_changed.connect(self._worker.set_scene)
         self.homeostasis_changed.connect(self._worker.set_homeostasis)
+        self.persist_neural.connect(self._worker.persist)
         self._worker.ready.connect(self._on_ready)
         self._worker.layout.connect(self.panel.brain_map.set_layout)
         self._worker.snapshot.connect(self._on_snapshot)
@@ -1673,6 +1680,7 @@ class FlybitWindow(QObject):
         self._save_timer.stop()
         self.food_overlay.hide()
         self.food_placement.hide()
+        self.persist_neural.emit()
         if self._brain_thread.isRunning():
             self._brain_thread.quit()
             self._brain_thread.wait(2500)
