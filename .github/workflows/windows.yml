@@ -33,10 +33,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install ".[desktop]" "pyinstaller>=6.11,<7"
 
-      - name: Compile and smoke test
+      - name: Compile and neural unit tests
         shell: pwsh
         run: |
-          python -m compileall -q flybrain flybit
+          python -m compileall -q flybrain flybit tests
+          python -m unittest discover -s tests -v
           python -c "import flybrain, flybit; print('Flybit', flybit.__version__)"
 
       - name: Build Flybit.exe
