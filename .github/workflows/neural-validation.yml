@@ -6,6 +6,8 @@ on:
     paths:
       - "flybrain/**"
       - "flybit/neural.py"
+      - "flybit/motion.py"
+      - "flybit/world.py"
       - "flybit/sensory.py"
       - "flybit/arousal.py"
       - "flybit/circadian.py"
