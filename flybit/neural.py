@@ -114,6 +114,7 @@ class FlybitNeuralCore:
         self._activity_trait = 0.5
         self._boldness_trait = 0.5
         self._curiosity_trait = 0.5
+        self._rest_drive = 0.0
         self._base_tonic = float(self.brain.tonic)
         self._base_noise_hz = float(self.brain.noise_hz)
 
@@ -124,6 +125,7 @@ class FlybitNeuralCore:
         activity_trait: float = 0.5,
         boldness_trait: float = 0.5,
         curiosity_trait: float = 0.5,
+        rest_drive: float = 0.0,
     ) -> None:
         """Update global physiology without selecting a direction or action.
 
@@ -135,6 +137,7 @@ class FlybitNeuralCore:
         self._activity_trait = float(np.clip(activity_trait, 0.0, 1.0))
         self._boldness_trait = float(np.clip(boldness_trait, 0.0, 1.0))
         self._curiosity_trait = float(np.clip(curiosity_trait, 0.0, 1.0))
+        self._rest_drive = float(np.clip(rest_drive, 0.0, 1.0))
 
         vitality_gain = 0.35 + 0.65 * self._vitality
         tonic_gain = (
@@ -150,11 +153,13 @@ class FlybitNeuralCore:
             + 0.15 * self._homeostatic_drive
         ) * (0.55 + 0.45 * self._vitality)
 
+        rest_tonic = 1.0 - 0.62 * self._rest_drive
+        rest_noise = 1.0 - 0.52 * self._rest_drive
         self.brain.tonic = self._base_tonic * float(
-            np.clip(tonic_gain, 0.20, 1.35)
+            np.clip(tonic_gain * rest_tonic, 0.12, 1.35)
         )
         self.brain.noise_hz = self._base_noise_hz * float(
-            np.clip(noise_gain, 0.20, 1.65)
+            np.clip(noise_gain * rest_noise, 0.12, 1.65)
         )
 
     def _resolve_cells(
@@ -410,6 +415,7 @@ class FlybitNeuralCore:
         arousal *= 0.92 + 0.12 * self._boldness_trait
         arousal *= 0.90 + 0.14 * self._curiosity_trait
         arousal *= 0.35 + 0.65 * self._vitality
+        arousal *= 1.0 - 0.48 * self._rest_drive
         forward_l = float(
             np.clip(
                 (dng_l + dna_locomotor + dopa_drive) * arousal,
