@@ -95,6 +95,15 @@ class GradedVisualTest(unittest.TestCase):
 
         self.assertGreater(float(brain.v[1, 0]), 0.0)
 
+    def test_raw_luminance_path_matches_photoreceptor_shape(self):
+        eyes = Eyes(np.array([-0.5, 0.5], np.float32))
+        drive = eyes.contrast_from_luminance(
+            np.array([0.2, 0.9], np.float32)
+        )
+        self.assertEqual(drive.shape, (2,))
+        self.assertLess(float(drive[0]), 0.0)
+        self.assertAlmostEqual(float(drive[1]), 0.0, places=6)
+
     def test_contrast_transducer_is_signed_and_adapting(self):
         eyes = Eyes(np.array([-0.5, 0.5], np.float32))
 
