@@ -14,6 +14,8 @@ import numpy as np
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication, QImage, qGray
 
+from .sensory import DesktopMotionModel, SensoryDynamics
+
 
 class DesktopRetinaSampler:
     """Sample the screen around the fly as raw luminance rays."""
@@ -33,6 +35,7 @@ class DesktopRetinaSampler:
             endpoint=False,
             dtype=np.float32,
         )
+        self.motion = DesktopMotionModel(cursor_radius=14.0)
 
     @staticmethod
     def _screen_at(point: QPoint):
@@ -65,13 +68,38 @@ class DesktopRetinaSampler:
             )
 
         geom = screen.geometry()
-        pixmap = screen.grabWindow(0)
+        local_x = x - geom.left()
+        local_y = y - geom.top()
+
+        # Capture only the retinal neighbourhood instead of the full desktop.
+        # At 50 Hz a full-screen copy is unnecessarily expensive; the retina
+        # never samples beyond max(self.radii).
+        pad = max(self.radii) + 4
+        capture_left = max(0, int(math.floor(local_x - pad)))
+        capture_top = max(0, int(math.floor(local_y - pad)))
+        capture_right = min(
+            geom.width(),
+            int(math.ceil(local_x + pad + 1)),
+        )
+        capture_bottom = min(
+            geom.height(),
+            int(math.ceil(local_y + pad + 1)),
+        )
+        capture_width = max(1, capture_right - capture_left)
+        capture_height = max(1, capture_bottom - capture_top)
+
+        pixmap = screen.grabWindow(
+            0,
+            capture_left,
+            capture_top,
+            capture_width,
+            capture_height,
+        )
         image = pixmap.toImage().convertToFormat(
             QImage.Format.Format_RGB32
         )
-
-        local_x = x - geom.left()
-        local_y = y - geom.top()
+        sample_x = local_x - capture_left
+        sample_y = local_y - capture_top
 
         values = np.empty(
             self.bins,
@@ -86,8 +114,8 @@ class DesktopRetinaSampler:
             count = 0
 
             for radius in self.radii:
-                px = int(round(local_x + cs * radius))
-                py = int(round(local_y + sn * radius))
+                px = int(round(sample_x + cs * radius))
+                py = int(round(sample_y + sn * radius))
                 if (
                     0 <= px < image.width()
                     and 0 <= py < image.height()
@@ -160,3 +188,35 @@ class DesktopRetinaSampler:
             0.0,
             1.0,
         ).astype(np.float32)
+
+
+    def sample_with_dynamics(
+        self,
+        *,
+        x: float,
+        y: float,
+        heading: float,
+        cursor: QPoint | None = None,
+        food: tuple[float, float, float] | None = None,
+        timestamp: float | None = None,
+    ) -> tuple[np.ndarray, SensoryDynamics | None]:
+        """Capture retina and temporal motion cues from the same observation."""
+        luminance = self.sample(
+            x=x,
+            y=y,
+            heading=heading,
+            cursor=cursor,
+            food=food,
+        )
+        if cursor is None:
+            return luminance, None
+        dynamics = self.motion.update(
+            body_x=x,
+            body_y=y,
+            heading=heading,
+            cursor_x=float(cursor.x()),
+            cursor_y=float(cursor.y()),
+            luminance=luminance,
+            timestamp=timestamp,
+        )
+        return luminance, dynamics

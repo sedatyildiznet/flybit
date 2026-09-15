@@ -7,6 +7,7 @@ No mouse/window rule selects movement here.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -14,6 +15,7 @@ from flybrain import FlyBrain
 from flybrain.eyes import Blob, Eyes
 
 from .motion import MotorActivity
+from .state import state_dir
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,7 @@ class FlybitNeuralCore:
         *,
         device: str = "auto",
         seed: int = 64,
+        persistent_state: bool = False,
     ) -> None:
         self.brain = FlyBrain(
             device=device,
@@ -104,6 +107,16 @@ class FlybitNeuralCore:
                 dtype=np.int64,
             )
 
+        # Modeled temporal looming transduction targets the identified LPLC2
+        # visual-projection population. It never stimulates descending motor
+        # neurons directly and is disabled automatically if the type is absent.
+        self.loom_groups = {
+            "L": self._resolve_cells(["LPLC2"], side="L"),
+            "R": self._resolve_cells(["LPLC2"], side="R"),
+        }
+        self._retinal_loom_left = 0.0
+        self._retinal_loom_right = 0.0
+
         self._brain_xy = self._normalize_brain_positions()
         self._motor_rates = {
             name: 0.0
@@ -112,17 +125,91 @@ class FlybitNeuralCore:
         self._homeostatic_drive = 0.0
         self._vitality = 1.0
         self._activity_trait = 0.5
+        self._boldness_trait = 0.5
+        self._curiosity_trait = 0.5
+        self._rest_drive = 0.0
+        self._threat_arousal = 0.0
+        self._base_tonic = float(self.brain.tonic)
+        self._base_noise_hz = float(self.brain.noise_hz)
+        self._persistent_path: Path | None = (
+            state_dir() / "neural_state.npz"
+            if persistent_state
+            else None
+        )
+        self._restored_state = False
+        if self._persistent_path is not None:
+            self._restored_state = self.load_persistent_state()
 
     def set_homeostasis(
         self,
         hunger: float,
         vitality: float,
         activity_trait: float = 0.5,
+        boldness_trait: float = 0.5,
+        curiosity_trait: float = 0.5,
+        rest_drive: float = 0.0,
+        threat_arousal: float = 0.0,
     ) -> None:
-        """Update internal physiological context without selecting direction."""
+        """Update global physiology without selecting a direction or action.
+
+        Individual traits modulate tonic/arousal statistics only. They never
+        issue steering, feeding or escape commands.
+        """
         self._homeostatic_drive = float(np.clip(hunger, 0.0, 1.0))
         self._vitality = float(np.clip(vitality, 0.0, 1.0))
         self._activity_trait = float(np.clip(activity_trait, 0.0, 1.0))
+        self._boldness_trait = float(np.clip(boldness_trait, 0.0, 1.0))
+        self._curiosity_trait = float(np.clip(curiosity_trait, 0.0, 1.0))
+        self._rest_drive = float(np.clip(rest_drive, 0.0, 1.0))
+        self._threat_arousal = float(
+            np.clip(threat_arousal, 0.0, 1.0)
+        )
+
+        vitality_gain = 0.35 + 0.65 * self._vitality
+        tonic_gain = (
+            0.72
+            + 0.28 * self._activity_trait
+            + 0.12 * self._homeostatic_drive
+            + 0.08 * self._boldness_trait
+        ) * vitality_gain
+        noise_gain = (
+            0.60
+            + 0.35 * self._activity_trait
+            + 0.25 * self._curiosity_trait
+            + 0.15 * self._homeostatic_drive
+        ) * (0.55 + 0.45 * self._vitality)
+
+        rest_tonic = 1.0 - 0.62 * self._rest_drive
+        rest_noise = 1.0 - 0.52 * self._rest_drive
+        sensitization_tonic = 1.0 + 0.24 * self._threat_arousal
+        sensitization_noise = 1.0 + 0.34 * self._threat_arousal
+        self.brain.tonic = self._base_tonic * float(
+            np.clip(
+                tonic_gain * rest_tonic * sensitization_tonic,
+                0.12,
+                1.45,
+            )
+        )
+        self.brain.noise_hz = self._base_noise_hz * float(
+            np.clip(
+                noise_gain * rest_noise * sensitization_noise,
+                0.12,
+                1.85,
+            )
+        )
+
+    def set_visual_motion(
+        self,
+        loom_left: float,
+        loom_right: float,
+    ) -> None:
+        """Set modeled raw-retina looming cues for LPLC2 transduction."""
+        self._retinal_loom_left = float(
+            np.clip(loom_left, 0.0, 1.0)
+        )
+        self._retinal_loom_right = float(
+            np.clip(loom_right, 0.0, 1.0)
+        )
 
     def _resolve_cells(
         self,
@@ -173,6 +260,113 @@ class FlybitNeuralCore:
 
         return np.flatnonzero(mask).astype(np.int64)
 
+    @staticmethod
+    def _to_host(array) -> np.ndarray:
+        if hasattr(array, "get"):
+            array = array.get()
+        return np.asarray(array)
+
+    def load_persistent_state(self) -> bool:
+        """Restore dynamic neural state for the same persistent organism.
+
+        Connectome weights are never loaded from this file. This persists
+        membrane/adaptation dynamics only, not invented synaptic plasticity.
+        """
+        path = self._persistent_path
+        if path is None or not path.exists():
+            return False
+        try:
+            with np.load(path, allow_pickle=False) as saved:
+                v = np.asarray(saved["v"], dtype=np.float32)
+                adaptation = np.asarray(
+                    saved["eye_adaptation"],
+                    dtype=np.float32,
+                )
+                rates = np.asarray(
+                    saved["motor_rates"],
+                    dtype=np.float64,
+                )
+                steps = int(saved["steps"][0])
+
+            if v.shape != tuple(self.brain.v.shape):
+                return False
+            if adaptation.shape != self.eyes.adaptation.shape:
+                return False
+            names = sorted(self._motor_rates)
+            if rates.shape != (len(names),):
+                return False
+            if not np.all(np.isfinite(v)):
+                return False
+            if not np.all(np.isfinite(adaptation)):
+                return False
+
+            self.brain.v = self.brain.xp.asarray(
+                v,
+                dtype=self.brain.xp.float32,
+            )
+            self.brain.fired = self.brain.xp.empty(
+                0,
+                self.brain.xp.int64,
+            )
+            self.brain.steps = max(0, steps)
+            if self.brain.graded_visual and len(self.brain.graded):
+                clipped = self.brain.xp.clip(
+                    self.brain.v[self.brain._graded],
+                    -np.float32(self.brain.graded_clip),
+                    np.float32(self.brain.graded_clip),
+                )
+                self.brain.graded_output = self.brain.xp.tanh(
+                    clipped / np.float32(self.brain.graded_scale)
+                )
+            self.eyes.adaptation = np.clip(
+                adaptation,
+                0.01,
+                1.0,
+            ).astype(np.float32)
+            for name, rate in zip(names, rates):
+                self._motor_rates[name] = max(0.0, float(rate))
+            return True
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+
+    def save_persistent_state(self) -> bool:
+        """Atomically persist dynamic neural state for the next launch."""
+        path = self._persistent_path
+        if path is None:
+            return False
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            names = sorted(self._motor_rates)
+            tmp = path.with_suffix(".tmp")
+            with tmp.open("wb") as stream:
+                np.savez_compressed(
+                    stream,
+                    v=self._to_host(self.brain.v).astype(
+                        np.float32,
+                        copy=False,
+                    ),
+                    eye_adaptation=np.asarray(
+                        self.eyes.adaptation,
+                        dtype=np.float32,
+                    ),
+                    motor_rates=np.asarray(
+                        [self._motor_rates[name] for name in names],
+                        dtype=np.float64,
+                    ),
+                    steps=np.asarray(
+                        [int(self.brain.steps)],
+                        dtype=np.int64,
+                    ),
+                )
+            tmp.replace(path)
+            return True
+        except OSError:
+            return False
+
+    @property
+    def restored_state(self) -> bool:
+        return bool(self._restored_state)
+
     @property
     def device(self) -> str:
         return self.brain.device
@@ -180,6 +374,13 @@ class FlybitNeuralCore:
     @property
     def neuron_count(self) -> int:
         return int(self.brain.n)
+
+    @property
+    def looming_cell_count(self) -> int:
+        return int(
+            len(self.loom_groups["L"])
+            + len(self.loom_groups["R"])
+        )
 
     @property
     def graded_cell_count(self) -> int:
@@ -374,7 +575,11 @@ class FlybitNeuralCore:
         # locomotor readiness while preserving the network's left/right choice.
         arousal = 0.72 + 0.38 * self._homeostatic_drive
         arousal *= 0.82 + 0.28 * self._activity_trait
+        arousal *= 0.92 + 0.12 * self._boldness_trait
+        arousal *= 0.90 + 0.14 * self._curiosity_trait
         arousal *= 0.35 + 0.65 * self._vitality
+        arousal *= 1.0 - 0.48 * self._rest_drive
+        arousal *= 1.0 + 0.18 * self._threat_arousal
         forward_l = float(
             np.clip(
                 (dng_l + dna_locomotor + dopa_drive) * arousal,
@@ -561,8 +766,36 @@ class FlybitNeuralCore:
             receptor_luminance,
             dt=self.brain.dt,
         )
+
+        # Raw temporal expansion is an optic-lobe model boundary: the cue is
+        # derived from luminance only and injected into biologically identified
+        # LPLC2 visual projection cells, never into DN motor read-outs.
+        inject = []
+        loom_gain = 0.55
+        if (
+            self._retinal_loom_left > 0.0
+            and len(self.loom_groups["L"])
+        ):
+            inject.append(
+                (
+                    self.loom_groups["L"],
+                    self._retinal_loom_left * loom_gain,
+                )
+            )
+        if (
+            self._retinal_loom_right > 0.0
+            and len(self.loom_groups["R"])
+        ):
+            inject.append(
+                (
+                    self.loom_groups["R"],
+                    self._retinal_loom_right * loom_gain,
+                )
+            )
+
         fired = self.brain.step(
-            eye_drive=eye_drive
+            eye_drive=eye_drive,
+            inject=inject,
         )
         return self._finish_step(fired)
 

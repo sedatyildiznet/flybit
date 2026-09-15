@@ -57,7 +57,7 @@ Only cell types with direct physiological support are placed in the graded set f
 
 The analog output is a bounded signed function of membrane state. Hyperpolarization and depolarization therefore both alter downstream release instead of a hyperpolarized cell becoming permanently silent.
 
-Connection identity, direction, weight and transmitter-derived sign still come from MaleCNS. There is no object, looming, threat or action classifier in this route.
+Connection identity, direction, weight and transmitter-derived sign still come from MaleCNS. There is no semantic object/threat/action classifier in this route. Flybit does include one explicit modeled optic-lobe boundary: frame-to-frame dark retinal expansion is converted into left/right looming drive on identified LPLC2 visual-projection cells. This compensates for motion selectivity that the simplified whole-CNS neuron model cannot be assumed to reproduce biophysically; it never stimulates descending motor neurons directly.
 
 The graded time constants and transfer scale are computational parameters rather than fitted single-cell biophysical models. They must not be presented as experimentally measured membrane constants.
 
@@ -83,10 +83,14 @@ raw desktop pixels
     -> graded L1/L2/L3
     -> rest of MaleCNS
     -> descending-neuron motor read-out
-    -> flat 2-D desktop body
+    -> 2.5-D desktop body (screen x/y + independent altitude)
 ```
 
-The screen sampler performs luminance downsampling only. It does not identify windows, text, objects, motion classes or threats. The cursor is rendered into the retinal panorama as a silhouette because platform screen capture commonly omits the hardware pointer.
+The screen sampler performs luminance downsampling only. It does not identify windows, text, objects or semantic threats. A separate temporal visual transducer compares consecutive raw panoramas to estimate retinal expansion and whole-field shift; the expansion channel is explicitly marked MODELED and targets LPLC2 rather than motor output. The cursor is rendered into the retinal panorama as a silhouette because platform screen capture commonly omits the hardware pointer.
+
+The desktop retina targets a 20 ms cadence. To keep this practical, capture is restricted to the local region actually reached by the six retinal radii instead of copying the complete display. Because cursor angular width is computed from physical screen geometry, an approaching cursor occupies progressively more angular bins and therefore produces real temporal looming in the retinal stream.
+
+A separate temporal observer computes cursor distance, velocity, acceleration, closing speed, angular growth, TTC and whole-field optic flow for validation/debugging. These values are not movement commands. A modeled near-field disturbance value is also exposed but remains telemetry-only until a defensible MaleCNS mechanosensory receptor mapping is available.
 
 ## Roadmap
 
@@ -105,7 +109,7 @@ MaleCNS is a measured wiring diagram. Flybit is still a computational nervous-sy
 
 ## Desktop body bridge
 
-The current Windows organism uses a deliberately small 2-D kinematic decoder. It does not inspect the cursor or window state to select behaviour.
+The current Windows organism uses a deliberately small 2.5-D kinematic decoder. It does not inspect the cursor or window state to select behaviour.
 
 Measured/identified descending-neuron groups provide the motor signal:
 
@@ -115,9 +119,9 @@ Measured/identified descending-neuron groups provide the motor signal:
 - `DNg02_*` MaleCNS subtypes -> flight-thrust / wing-power drive
 - `MDN` -> backward locomotor drive
 
-The whole desktop is one flat locomotion plane. The body decoder has planar drag and desktop boundaries, but no downward gravity, falling or window-edge landing physics.
+Screen x/y form one flat locomotion plane. Flight now has a separate virtual altitude and vertical-velocity axis. DNp01 supplies a take-off impulse and DNg02 contributes sustained lift; gravity acts only on this virtual altitude, never on monitor Y. Landing occurs when altitude returns to the desktop plane. This preserves the no-falling-across-the-monitor rule while giving airborne state physical duration.
 
-DNp01 starts a short planar flight burst rather than a fake vertical jump. DNa02 is decoded as yaw-only steering, so the rendered body cannot roll or pitch into somersaults.
+DNa02 is decoded as yaw-only steering, so the rendered body cannot roll or pitch into somersaults. Grounded rendering derives an alternating tripod gait from locomotor phase; the gait is presentation/body coupling and does not choose direction.
 
 Most descending motor groups are converted to short-window firing-rate estimates before force mapping. This prevents isolated stochastic spikes from becoming full movement commands while preserving sustained neural activity. DNp01 is the exception: Giant Fiber take-off physiology is event-like, so one DNp01 spike is preserved as an immediate escape signal.
 
@@ -162,6 +166,9 @@ and restores metabolic energy.
 
 Each persistent organism has a wall-clock birth timestamp, deterministic
 individual phenotype, finite modeled lifespan, metabolic energy and vitality.
+Activity, boldness and curiosity now modulate global neural tonic/noise/arousal
+statistics symmetrically; they do not directly choose steering, escape or
+feeding actions.
 Ageing and energy can reduce body capacity. These are computational organism
 states; they must not be described as literal biological immortality or a
 complete living animal.
@@ -172,3 +179,43 @@ The 2-D body now exposes speed, acceleration, turn rate, gait phase, estimated
 wingbeat rate and locomotor load. This does not yet replace the kinematic body
 with a full musculoskeletal Drosophila model, but it creates the instrumentation
 needed to validate that future biomechanical layer.
+
+
+## Persistent organism identity
+
+Each organism may have a compact persistent display name. The name is cosmetic
+identity only: it has no neural or behavioural effect. It can be edited only
+from the native control panel's Life tab; the fly context menu does not expose
+a rename action.
+
+
+## Circadian rest physiology
+
+Flybit maintains a modeled wake drive with broad morning/evening activity peaks,
+ambient-retina luminance input and persistent homeostatic sleep pressure. The
+resulting rest drive modulates global neural tonic activity, intrinsic noise and
+locomotor readiness. It never calls a sleep, wake, turn or escape action
+directly. The clock shape and timescales are computational approximations rather
+than a complete emulation of the Drosophila circadian network.
+
+
+## Modeled food odor field
+
+The desktop sugar source now emits a smooth synthetic odor field sampled at two
+virtual antenna positions. Hunger changes the observer salience of that odor but
+does not change its physical concentration. Left/right concentration and
+gradient are exposed in the Care panel. The odor signal is intentionally not
+injected into MaleCNS yet: the bundled runtime metadata does not provide the
+receptor-level olfactory mapping needed to make that claim responsibly.
+
+
+## Habituation and sensitization
+
+Repeated raw retinal expansion gradually reduces the modeled looming-transducer
+gain and recovers when expansion stops. Strong stimuli retain a non-zero response.
+This is short-term sensory habituation, not a motor policy.
+
+Conversely, when the nervous system itself produces DN escape output, a
+short-lived threat-arousal state rises and decays over seconds. That state
+modulates global neural tonic/noise/readiness only; it cannot trigger an escape
+on its own. This gives post-escape sensitization without a mouse-near rule.

@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMenu,
     QPlainTextEdit,
     QProgressBar,
@@ -38,7 +39,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .arousal import ThreatArousalModel
 from .care import CareModel
+from .circadian import CircadianModel
 from .icon import flybit_icon
 from .life import LifeModel, LifeSnapshot
 from .perception import DesktopSemanticScanner, PerceivedObject
@@ -48,7 +51,8 @@ from .motion import (
     MotorActivity,
 )
 from .neural import FlybitNeuralCore, NeuralSnapshot
-from .state import load_state, save_state
+from .olfaction import FoodOdorModel
+from .state import load_state, normalize_display_name, save_state
 from .vision import DesktopRetinaSampler
 
 
@@ -64,23 +68,31 @@ class BrainWorker(QObject):
         self._target_width = 0.035
         self._scene_luminance = None
         self._scene_azimuth = None
+        self._sensory_dynamics = None
         self._timer: QTimer | None = None
         self._core: FlybitNeuralCore | None = None
         self._hunger_drive = 0.0
         self._vitality = 1.0
         self._activity_trait = 0.5
+        self._boldness_trait = 0.5
+        self._curiosity_trait = 0.5
+        self._rest_drive = 0.0
+        self._threat_arousal = 0.0
 
     @Slot()
     def start(self) -> None:
         try:
             self._core = FlybitNeuralCore(
-                device="auto"
+                device="auto",
+                persistent_state=True,
             )
             self.ready.emit(
                 {
                     "device": self._core.device,
                     "neurons": self._core.neuron_count,
                     "graded": self._core.graded_cell_count,
+                    "looming_cells": self._core.looming_cell_count,
+                    "restored": self._core.restored_state,
                 }
             )
             self.layout.emit(
@@ -114,25 +126,40 @@ class BrainWorker(QObject):
             min(0.75, float(width)),
         )
 
-    @Slot(object, object)
+    @Slot(object, object, object)
     def set_scene(
         self,
         luminance,
         azimuth,
+        dynamics,
     ) -> None:
         self._scene_luminance = luminance
         self._scene_azimuth = azimuth
+        self._sensory_dynamics = dynamics
 
-    @Slot(float, float, float)
+    @Slot(float, float, float, float, float, float, float)
     def set_homeostasis(
         self,
         hunger_drive: float,
         vitality: float,
         activity_trait: float,
+        boldness_trait: float,
+        curiosity_trait: float,
+        rest_drive: float,
+        threat_arousal: float,
     ) -> None:
         self._hunger_drive = float(hunger_drive)
         self._vitality = float(vitality)
         self._activity_trait = float(activity_trait)
+        self._boldness_trait = float(boldness_trait)
+        self._curiosity_trait = float(curiosity_trait)
+        self._rest_drive = float(rest_drive)
+        self._threat_arousal = float(threat_arousal)
+
+    @Slot()
+    def persist(self) -> None:
+        if self._core is not None:
+            self._core.save_persistent_state()
 
     @Slot()
     def _step(self) -> None:
@@ -143,7 +170,18 @@ class BrainWorker(QObject):
                 self._hunger_drive,
                 self._vitality,
                 self._activity_trait,
+                self._boldness_trait,
+                self._curiosity_trait,
+                self._rest_drive,
+                self._threat_arousal,
             )
+            if self._sensory_dynamics is not None:
+                self._core.set_visual_motion(
+                    self._sensory_dynamics.retinal_loom_left,
+                    self._sensory_dynamics.retinal_loom_right,
+                )
+            else:
+                self._core.set_visual_motion(0.0, 0.0)
             if (
                 self._scene_luminance is not None
                 and self._scene_azimuth is not None
@@ -157,6 +195,8 @@ class BrainWorker(QObject):
                     self._target_center,
                     self._target_width,
                 )
+            if snap.step % 250 == 0:
+                self._core.save_persistent_state()
             self.snapshot.emit(snap)
         except Exception as exc:
             if self._timer:
@@ -181,6 +221,8 @@ class FlyOverlay(QWidget):
         self.heading = 0.0
         self.airborne = True
         self.drive = 0.0
+        self.gait_phase = 0.0
+        self.altitude = 0.0
         self._wing_phase = 0.0
 
         self.setFixedSize(48, 40)
@@ -203,10 +245,14 @@ class FlyOverlay(QWidget):
         heading: float,
         airborne: bool,
         drive: float,
+        gait_phase: float = 0.0,
+        altitude: float = 0.0,
     ) -> None:
         self.heading = heading
         self.airborne = airborne
         self.drive = max(0.0, min(1.0, drive))
+        self.gait_phase = float(gait_phase) % 1.0
+        self.altitude = max(0.0, float(altitude))
         self._wing_phase = (
             self._wing_phase
             + (0.55 if airborne else 0.08)
@@ -227,16 +273,22 @@ class FlyOverlay(QWidget):
             math.degrees(self.heading)
         )
 
-        # Soft shadow gives the 40 px body separation from bright windows.
+        # Shadow fades with virtual altitude while remaining on the same screen
+        # plane. Altitude is depth, never monitor-Y gravity.
+        shadow_alpha = max(
+            18,
+            min(65, int(65 - self.altitude * 0.40)),
+        )
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(
-            QBrush(QColor(0, 0, 0, 65))
+            QBrush(QColor(0, 0, 0, shadow_alpha))
         )
         painter.drawEllipse(
             QRectF(-13, -5, 30, 15)
         )
 
-        # Six legs.
+        # Six legs use an alternating tripod gait while grounded. This is only
+        # body rendering derived from biomechanics; it never selects movement.
         leg_pen = QPen(
             QColor(35, 28, 22, 235),
             1.35,
@@ -245,18 +297,25 @@ class FlyOverlay(QWidget):
             Qt.PenCapStyle.RoundCap
         )
         painter.setPen(leg_pen)
-        for root_x, root_y, end_x, end_y in (
-            (-5, -4, -15, -12),
-            (1, -5, -3, -16),
-            (7, -4, 17, -11),
-            (-5, 4, -15, 12),
-            (1, 5, -3, 16),
-            (7, 4, 17, 11),
+        stride = (
+            math.sin(self.gait_phase * 2.0 * math.pi)
+            * 3.2
+            * self.drive
+            if not self.airborne
+            else 0.0
+        )
+        for root_x, root_y, end_x, end_y, phase_sign in (
+            (-5, -4, -15, -12, 1.0),
+            (1, -5, -3, -16, -1.0),
+            (7, -4, 17, -11, 1.0),
+            (-5, 4, -15, 12, -1.0),
+            (1, 5, -3, 16, 1.0),
+            (7, 4, 17, 11, -1.0),
         ):
             painter.drawLine(
                 root_x,
                 root_y,
-                end_x,
+                int(round(end_x + phase_sign * stride)),
                 end_y,
             )
 
@@ -564,6 +623,7 @@ class ControlPanel(QWidget):
 
     closed = Signal()
     feed_requested = Signal()
+    name_changed = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -584,11 +644,11 @@ class ControlPanel(QWidget):
 
         header = QHBoxLayout()
         title_box = QVBoxLayout()
-        title = QLabel("FLYBIT")
-        title.setObjectName("title")
+        self.title = QLabel("FLYBIT")
+        self.title.setObjectName("title")
         subtitle = QLabel("MaleCNS desktop organism")
         subtitle.setObjectName("muted")
-        title_box.addWidget(title)
+        title_box.addWidget(self.title)
         title_box.addWidget(subtitle)
         header.addLayout(title_box)
         header.addStretch()
@@ -720,6 +780,13 @@ class ControlPanel(QWidget):
         self.last_feed_label.setObjectName("muted")
         care_layout.addWidget(self.last_feed_label)
 
+        self.odor_status = QLabel(
+            "Odor field · no source · neural coupling disabled"
+        )
+        self.odor_status.setWordWrap(True)
+        self.odor_status.setObjectName("muted")
+        care_layout.addWidget(self.odor_status)
+
         self.feed_button = QPushButton("Place sugar…")
         self.feed_button.setObjectName("primary")
         self.feed_button.clicked.connect(
@@ -774,6 +841,12 @@ class ControlPanel(QWidget):
         self.perception_summary.setWordWrap(True)
         self.perception_summary.setObjectName("muted")
         perception_layout.addWidget(self.perception_summary)
+        self.sensory_summary = QLabel(
+            "Temporal vision · waiting for retinal motion samples…"
+        )
+        self.sensory_summary.setWordWrap(True)
+        self.sensory_summary.setObjectName("muted")
+        perception_layout.addWidget(self.sensory_summary)
         self.perception_log = QPlainTextEdit()
         self.perception_log.setReadOnly(True)
         self.perception_log.setObjectName("log")
@@ -787,6 +860,48 @@ class ControlPanel(QWidget):
         perception_layout.addWidget(perception_note)
         self.tabs.addTab(perception_tab, "Perception")
 
+        # Model boundary / provenance
+        model_tab = QWidget()
+        model_layout = QVBoxLayout(model_tab)
+        model_layout.setContentsMargins(8, 12, 8, 8)
+        model_title = QLabel("MODEL BOUNDARY & PROVENANCE")
+        model_title.setObjectName("section")
+        model_layout.addWidget(model_title)
+        model_text = QPlainTextEdit()
+        model_text.setReadOnly(True)
+        model_text.setObjectName("log")
+        model_text.setPlainText(
+            "MEASURED / DATA-DRIVEN\n"
+            "  • MaleCNS neuron identities and connection graph\n"
+            "  • connection direction / synapse-derived weights\n"
+            "  • transmitter-derived connection sign\n"
+            "  • mapped photoreceptor identities and azimuths\n"
+            "  • identified DN and LPLC2 cell types\n\n"
+            "MODELED\n"
+            "  • graded membrane constants / transfer functions\n"
+            "  • raw-luminance temporal looming → LPLC2 transduction\n"
+            "  • DN firing-rate → 2.5-D body decoder\n"
+            "  • altitude/lift/gravity and tripod gait rendering\n"
+            "  • hunger/metabolic/circadian/phenotype modulation\n\n"
+            "SYNTHETIC WORLD / TELEMETRY\n"
+            "  • desktop sugar object and nutrition collision\n"
+            "  • semantic Chrome/window/button labels\n"
+            "  • TTC/threat-salience/near-field observer metrics\n\n"
+            "NOT CLAIMED\n"
+            "  • complete biological brain emulation\n"
+            "  • receptor-accurate taste/odor/mechanosensation\n"
+            "  • complete muscles, hormones or synaptic plasticity"
+        )
+        model_layout.addWidget(model_text, 1)
+        model_note = QLabel(
+            "No modeled observer value may bypass the neural/body loop and "
+            "become a direct movement command."
+        )
+        model_note.setWordWrap(True)
+        model_note.setObjectName("foot")
+        model_layout.addWidget(model_note)
+        self.tabs.addTab(model_tab, "Model")
+
         # Life
         life_tab = QWidget()
         life_layout = QVBoxLayout(life_tab)
@@ -795,6 +910,21 @@ class ControlPanel(QWidget):
         life_title = QLabel("LIFE HISTORY & PHENOTYPE")
         life_title.setObjectName("section")
         life_layout.addWidget(life_title)
+
+        name_label = QLabel("ORGANISM NAME")
+        name_label.setObjectName("muted")
+        life_layout.addWidget(name_label)
+        self.name_edit = QLineEdit()
+        self.name_edit.setMaxLength(32)
+        self.name_edit.setPlaceholderText("Flybit")
+        self.name_edit.setToolTip(
+            "The organism can only be named from this control panel."
+        )
+        self.name_edit.editingFinished.connect(
+            lambda: self.name_changed.emit(self.name_edit.text())
+        )
+        life_layout.addWidget(self.name_edit)
+
         self.life_age = QLabel("Age · —")
         self.life_span = QLabel("Expected lifespan · —")
         self.life_sex = QLabel("Sex · Male")
@@ -817,6 +947,15 @@ class ControlPanel(QWidget):
         self.life_traits.setWordWrap(True)
         self.life_traits.setObjectName("muted")
         life_layout.addWidget(self.life_traits)
+        self.circadian_status = QLabel(
+            "Circadian wake — · sleep pressure — · rest drive —"
+        )
+        self.circadian_status.setWordWrap(True)
+        self.circadian_status.setObjectName("muted")
+        life_layout.addWidget(self.circadian_status)
+        self.arousal_status = QLabel("Threat arousal · —")
+        self.arousal_status.setObjectName("muted")
+        life_layout.addWidget(self.arousal_status)
         self.biomechanics = QLabel(
             "Speed — · acceleration — · gait — · wingbeat —"
         )
@@ -917,6 +1056,17 @@ class ControlPanel(QWidget):
                 background: #64d6ef;
                 border-radius: 4px;
             }
+            QLineEdit {
+                background: #0b1016;
+                border: 1px solid #2a3542;
+                border-radius: 7px;
+                color: #eef5fa;
+                padding: 7px 9px;
+                selection-background-color: #1f8fb0;
+            }
+            QLineEdit:focus {
+                border-color: #4ab6d2;
+            }
             #log {
                 background: #090c10;
                 border: 1px solid #252f3a;
@@ -974,6 +1124,13 @@ class ControlPanel(QWidget):
         root.addLayout(row)
         return bar
 
+    def set_name(self, name: str) -> None:
+        clean = normalize_display_name(name)
+        self.title.setText(clean.upper())
+        self.setWindowTitle(f"{clean} · Flybit Neural Control")
+        if not self.name_edit.hasFocus():
+            self.name_edit.setText(clean)
+
     def set_ready(self, info: dict) -> None:
         self.status.setText("● MALECNS ONLINE")
         self.neurons.value_label.setText(f"{int(info['neurons']):,}")
@@ -1013,6 +1170,7 @@ class ControlPanel(QWidget):
         feedings: int,
         last_feed: str | None,
         food_active: bool,
+        odor=None,
     ) -> None:
         pct = int(max(0.0, min(1.0, hunger)) * 100)
         self.hunger.setValue(pct)
@@ -1030,6 +1188,37 @@ class ControlPanel(QWidget):
             "Move sugar…"
             if food_active
             else "Place sugar…"
+        )
+        if odor is not None and odor.food_distance is not None:
+            self.odor_status.setText(
+                f"Modeled odor · L {odor.left:.3f} / R {odor.right:.3f} · "
+                f"gradient {odor.gradient:+.3f} · salience {odor.salience:.3f} · "
+                f"distance {odor.food_distance:.0f}px · neural coupling disabled"
+            )
+        else:
+            self.odor_status.setText(
+                "Odor field · no source · neural coupling disabled"
+            )
+
+    def update_sensory(self, dynamics) -> None:
+        if dynamics is None:
+            return
+        ttc = (
+            f"{dynamics.time_to_collision * 1000.0:.0f} ms"
+            if dynamics.time_to_collision is not None
+            else "—"
+        )
+        self.sensory_summary.setText(
+            f"Cursor {dynamics.cursor_distance:.0f}px · "
+            f"speed {dynamics.cursor_speed:.0f}px/s · "
+            f"closing {dynamics.closing_speed:.0f}px/s · "
+            f"loom {dynamics.looming_rate:.3f}rad/s · "
+            f"TTC {ttc} · optic flow {dynamics.optic_flow:+.3f}rev/s · "
+            f"loom L/R {dynamics.retinal_loom_left:.2f}/"
+            f"{dynamics.retinal_loom_right:.2f} · "
+            f"habituation {dynamics.loom_habituation:.2f} · "
+            f"near-field {dynamics.mechanosensory_disturbance:.2f} · "
+            f"observer salience {dynamics.threat_salience:.2f}"
         )
 
     def update_perception(
@@ -1057,6 +1246,8 @@ class ControlPanel(QWidget):
         self,
         life: LifeSnapshot,
         biomechanics,
+        circadian=None,
+        arousal=None,
     ) -> None:
         if life.age_days >= 1.0:
             age_text = f"{life.age_days:.2f} days"
@@ -1082,8 +1273,21 @@ class ControlPanel(QWidget):
             f"acceleration {biomechanics.acceleration:.1f}px/s² · "
             f"turn {biomechanics.turn_rate:.2f}rad/s · "
             f"gait {biomechanics.gait_phase:.2f} · "
-            f"wingbeat {biomechanics.wingbeat_hz:.0f}Hz"
+            f"wingbeat {biomechanics.wingbeat_hz:.0f}Hz · "
+            f"altitude {biomechanics.altitude:.1f} · "
+            f"vertical {biomechanics.vertical_speed:+.1f}"
         )
+        if circadian is not None:
+            self.circadian_status.setText(
+                f"Circadian wake {circadian.wake_drive:.2f} · "
+                f"sleep pressure {circadian.sleep_pressure:.2f} · "
+                f"rest drive {circadian.rest_drive:.2f} · "
+                f"ambient {circadian.ambient_luminance:.2f}"
+            )
+        if arousal is not None:
+            self.arousal_status.setText(
+                f"Threat arousal · {arousal.threat_arousal:.2f}"
+            )
 
     def append_log(self, message: str) -> None:
         stamp = time.strftime("%H:%M:%S")
@@ -1104,8 +1308,11 @@ class ControlPanel(QWidget):
 class FlybitWindow(QObject):
     """Application controller; only the organism is visible by default."""
 
-    scene_changed = Signal(object, object)
-    homeostasis_changed = Signal(float, float, float)
+    scene_changed = Signal(object, object, object)
+    homeostasis_changed = Signal(
+        float, float, float, float, float, float, float
+    )
+    persist_neural = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -1113,12 +1320,19 @@ class FlybitWindow(QObject):
         self.state = load_state()
         self.care = CareModel(self.state)
         self.life = LifeModel(self.state)
+        self.circadian = CircadianModel(self.state)
+        self.arousal = ThreatArousalModel()
+        self.olfaction = FoodOdorModel()
         self.semantic_scanner = DesktopSemanticScanner()
         self.nearby_objects: tuple[PerceivedObject, ...] = ()
 
         self.fly = FlyOverlay()
         self.fly.setWindowIcon(flybit_icon())
         self.panel = ControlPanel()
+        self.panel.set_name(self.state.display_name)
+        self.fly.setToolTip(
+            f"{self.state.display_name} · click for neural control panel"
+        )
         if (
             self.state.panel_w is not None
             and self.state.panel_h is not None
@@ -1165,6 +1379,7 @@ class FlybitWindow(QObject):
         )
         self.latest_motor = MotorActivity()
         self.latest_snapshot: NeuralSnapshot | None = None
+        self.latest_sensory = None
         self._last_log: dict[str, float] = {}
 
         self._brain_thread = QThread(self)
@@ -1173,6 +1388,7 @@ class FlybitWindow(QObject):
         self._brain_thread.started.connect(self._worker.start)
         self.scene_changed.connect(self._worker.set_scene)
         self.homeostasis_changed.connect(self._worker.set_homeostasis)
+        self.persist_neural.connect(self._worker.persist)
         self._worker.ready.connect(self._on_ready)
         self._worker.layout.connect(self.panel.brain_map.set_layout)
         self._worker.snapshot.connect(self._on_snapshot)
@@ -1183,6 +1399,9 @@ class FlybitWindow(QObject):
         self.fly.context_requested.connect(self._context_menu)
         self.panel.feed_requested.connect(
             self._begin_food_placement
+        )
+        self.panel.name_changed.connect(
+            self._rename_organism
         )
         self.food_placement.placed.connect(
             self._place_food_at
@@ -1195,7 +1414,8 @@ class FlybitWindow(QObject):
         self._physics_timer.start()
 
         self._vision_timer = QTimer(self)
-        self._vision_timer.setInterval(80)
+        self._vision_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._vision_timer.setInterval(20)
         self._vision_timer.timeout.connect(self._capture_scene)
         self._vision_timer.start()
         self._capture_scene()
@@ -1245,14 +1465,22 @@ class FlybitWindow(QObject):
             if food is not None
             else None
         )
-        luminance = self.vision.sample(
+        cursor = QCursor.pos()
+        luminance, dynamics = self.vision.sample_with_dynamics(
             x=body.x,
             y=body.y,
             heading=body.heading,
-            cursor=QCursor.pos(),
+            cursor=cursor,
             food=food_point,
         )
-        self.scene_changed.emit(luminance, self.vision.azimuth)
+        self.latest_sensory = dynamics
+        if self.panel.isVisible() and dynamics is not None:
+            self.panel.update_sensory(dynamics)
+        self.scene_changed.emit(
+            luminance,
+            self.vision.azimuth,
+            dynamics,
+        )
 
     @Slot()
     def _tick(self) -> None:
@@ -1265,10 +1493,30 @@ class FlybitWindow(QObject):
             hunger=self.state.hunger,
         )
         life = self.life.snapshot()
+        ambient = (
+            self.latest_sensory.ambient_luminance
+            if self.latest_sensory is not None
+            else 0.5
+        )
+        self.circadian.tick(
+            0.020,
+            motor_load=motor_load,
+            ambient_luminance=ambient,
+        )
+        circadian = self.circadian.snapshot()
+        self.arousal.tick(
+            0.020,
+            escape_drive=self.latest_motor.escape,
+        )
+        arousal = self.arousal.snapshot()
         self.homeostasis_changed.emit(
             self.care.homeostatic_drive,
             life.vitality,
             life.activity,
+            life.boldness,
+            life.curiosity,
+            circadian.rest_drive,
+            arousal.threat_arousal,
         )
         bounds = self._desktop_bounds()
         physiology_gain = life.vitality * (0.78 + 0.30 * life.activity)
@@ -1293,6 +1541,7 @@ class FlybitWindow(QObject):
                 )
 
         body = self.kinematics.state
+        bio = self.kinematics.biomechanics()
         self.fly.set_pose(
             heading=body.heading,
             airborne=body.airborne,
@@ -1301,6 +1550,8 @@ class FlybitWindow(QObject):
                 self.latest_motor.escape,
                 self.latest_motor.flight,
             ),
+            gait_phase=bio.gait_phase,
+            altitude=bio.altitude,
         )
         self._position_overlay()
 
@@ -1348,17 +1599,48 @@ class FlybitWindow(QObject):
         self._refresh_care()
         self._capture_scene()
 
+    @Slot(str)
+    def _rename_organism(self, name: str) -> None:
+        clean = normalize_display_name(name)
+        if clean == self.state.display_name:
+            self.panel.set_name(clean)
+            return
+        self.state.display_name = clean
+        self.panel.set_name(clean)
+        self.fly.setToolTip(
+            f"{clean} · click for neural control panel"
+        )
+        self.panel.append_log(f"organism renamed · {clean}")
+        save_state(self.state)
+
     @Slot()
     def _refresh_care(self) -> None:
+        body = self.kinematics.state
+        food = self.care.food
+        odor_food = (
+            (food.x, food.y, food.amount)
+            if food is not None
+            else None
+        )
+        odor = self.olfaction.sample(
+            x=body.x,
+            y=body.y,
+            heading=body.heading,
+            food=odor_food,
+            hunger_drive=self.care.homeostatic_drive,
+        )
         self.panel.update_care(
             hunger=self.state.hunger,
             feedings=self.state.feedings,
             last_feed=self.state.last_feed_at,
-            food_active=self.care.food is not None,
+            food_active=food is not None,
+            odor=odor,
         )
         self.panel.update_life(
             self.life.snapshot(),
             self.kinematics.biomechanics(),
+            self.circadian.snapshot(),
+            self.arousal.snapshot(),
         )
 
     @Slot()
@@ -1380,11 +1662,19 @@ class FlybitWindow(QObject):
     def _on_ready(self, info: dict) -> None:
         self.panel.set_ready(info)
         self.panel.append_log("MaleCNS neural core online")
+        if bool(info.get("restored")):
+            self.panel.append_log(
+                "persistent neural membrane/adaptation state restored"
+            )
         self.panel.append_log(
             "R1–R8 / L1–L3 graded vision active"
         )
         self.panel.append_log(
             "raw desktop panorama online · 384 angular bins"
+        )
+        self.panel.append_log(
+            "modeled retinal looming → LPLC2 · "
+            f"{int(info.get('looming_cells', 0))} cells"
         )
         self._refresh_care()
 
@@ -1448,6 +1738,9 @@ class FlybitWindow(QObject):
                 self.latest_snapshot,
                 airborne=self.kinematics.state.airborne,
             )
+        if self.latest_sensory is not None:
+            self.panel.update_sensory(self.latest_sensory)
+        self.panel.set_name(self.state.display_name)
         self._refresh_care()
 
         bounds = self._desktop_bounds()
@@ -1509,6 +1802,7 @@ class FlybitWindow(QObject):
         self._save_timer.stop()
         self.food_overlay.hide()
         self.food_placement.hide()
+        self.persist_neural.emit()
         if self._brain_thread.isRunning():
             self._brain_thread.quit()
             self._brain_thread.wait(2500)
