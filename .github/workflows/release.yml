@@ -112,7 +112,7 @@ jobs:
           python -m compileall -q flybrain flybit tests
           python -m unittest discover -s tests -v
           $env:QT_QPA_PLATFORM="offscreen"
-          python -c "from PySide6.QtWidgets import QApplication; from flybit.ui import FlyOverlay, ControlPanel; app=QApplication([]); fly=FlyOverlay(); panel=ControlPanel(); print('Qt desktop shell OK')"
+          python -c "from PySide6.QtWidgets import QApplication; from flybit.ui import FlyOverlay, FoodOverlay, ControlPanel; app=QApplication([]); fly=FlyOverlay(); food=FoodOverlay(); panel=ControlPanel(); panel.update_care(hunger=.5, feedings=1, last_feed=None, food_active=False); print('Qt desktop shell + care OK')"
 
       - name: Generate Windows icon
         shell: pwsh
