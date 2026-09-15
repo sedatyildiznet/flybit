@@ -79,13 +79,15 @@ class BrainWorker(QObject):
     def start(self) -> None:
         try:
             self._core = FlybitNeuralCore(
-                device="auto"
+                device="auto",
+                persistent_state=True,
             )
             self.ready.emit(
                 {
                     "device": self._core.device,
                     "neurons": self._core.neuron_count,
                     "graded": self._core.graded_cell_count,
+                    "restored": self._core.restored_state,
                 }
             )
             self.layout.emit(
@@ -171,6 +173,8 @@ class BrainWorker(QObject):
                     self._target_center,
                     self._target_width,
                 )
+            if snap.step % 250 == 0:
+                self._core.save_persistent_state()
             self.snapshot.emit(snap)
         except Exception as exc:
             if self._timer:
@@ -1533,6 +1537,10 @@ class FlybitWindow(QObject):
     def _on_ready(self, info: dict) -> None:
         self.panel.set_ready(info)
         self.panel.append_log("MaleCNS neural core online")
+        if bool(info.get("restored")):
+            self.panel.append_log(
+                "persistent neural membrane/adaptation state restored"
+            )
         self.panel.append_log(
             "R1–R8 / L1–L3 graded vision active"
         )
