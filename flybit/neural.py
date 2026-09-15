@@ -28,6 +28,9 @@ class NeuralSnapshot:
     visual_center: float
     visual_half_width: float
     motor: MotorActivity
+    homeostatic_drive: float
+    vitality: float
+    motor_rates: tuple[tuple[str, float], ...]
     active_brain_points: tuple[tuple[float, float], ...]
 
 
@@ -106,6 +109,20 @@ class FlybitNeuralCore:
             name: 0.0
             for name in self.motor_groups
         }
+        self._homeostatic_drive = 0.0
+        self._vitality = 1.0
+        self._activity_trait = 0.5
+
+    def set_homeostasis(
+        self,
+        hunger: float,
+        vitality: float,
+        activity_trait: float = 0.5,
+    ) -> None:
+        """Update internal physiological context without selecting direction."""
+        self._homeostatic_drive = float(np.clip(hunger, 0.0, 1.0))
+        self._vitality = float(np.clip(vitality, 0.0, 1.0))
+        self._activity_trait = float(np.clip(activity_trait, 0.0, 1.0))
 
     def _resolve_cells(
         self,
@@ -353,16 +370,21 @@ class FlybitNeuralCore:
         dopa_r = decode("dopa_R", 1.0, 10.0)
         dopa_drive = 0.35 * (dopa_l + dopa_r)
 
+        # Hunger is an internal arousal state, not a target selector. It raises
+        # locomotor readiness while preserving the network's left/right choice.
+        arousal = 0.72 + 0.38 * self._homeostatic_drive
+        arousal *= 0.82 + 0.28 * self._activity_trait
+        arousal *= 0.35 + 0.65 * self._vitality
         forward_l = float(
             np.clip(
-                dng_l + dna_locomotor + dopa_drive,
+                (dng_l + dna_locomotor + dopa_drive) * arousal,
                 0.0,
                 1.0,
             )
         )
         forward_r = float(
             np.clip(
-                dng_r + dna_locomotor + dopa_drive,
+                (dng_r + dna_locomotor + dopa_drive) * arousal,
                 0.0,
                 1.0,
             )
@@ -487,6 +509,12 @@ class FlybitNeuralCore:
             visual_center=float(visual_center),
             visual_half_width=float(visual_half_width),
             motor=self._motor_activity(fired_np),
+            homeostatic_drive=self._homeostatic_drive,
+            vitality=self._vitality,
+            motor_rates=tuple(
+                (name, float(rate))
+                for name, rate in sorted(self._motor_rates.items())
+            ),
             active_brain_points=self._active_points(
                 fired_np
             ),
