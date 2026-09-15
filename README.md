@@ -50,8 +50,7 @@ The connectome data is not bundled into the executable. On first launch, the neu
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
-pip install -r requirements.txt
-pip install -r requirements-flybit.txt
+pip install -e ".[desktop]"
 python -m flybit
 ```
 
