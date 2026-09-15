@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 
-STATE_SCHEMA = 4
+STATE_SCHEMA = 5
 
 
 @dataclass
@@ -26,6 +26,7 @@ class FlybitState:
     activity_trait: float | None = None
     boldness_trait: float | None = None
     curiosity_trait: float | None = None
+    sleep_pressure: float = 0.35
     panel_x: int | None = None
     panel_y: int | None = None
     panel_w: int | None = None
@@ -58,6 +59,10 @@ def normalize_display_name(value: str | None) -> str:
 
 def save_state(state: FlybitState) -> None:
     state.hunger = max(0.0, min(1.0, float(state.hunger)))
+    state.sleep_pressure = max(
+        0.0,
+        min(1.0, float(getattr(state, "sleep_pressure", 0.35))),
+    )
     state.display_name = normalize_display_name(state.display_name)
     state.schema = STATE_SCHEMA
     _path().write_text(
@@ -89,6 +94,7 @@ def load_state() -> FlybitState:
                 "activity_trait",
                 "boldness_trait",
                 "curiosity_trait",
+                "sleep_pressure",
                 "panel_x",
                 "panel_y",
                 "panel_w",
