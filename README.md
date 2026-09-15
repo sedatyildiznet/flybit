@@ -32,7 +32,7 @@ Flybit currently:
 - does **not** use the `FeatureDetectors` shortcut in the desktop organism path
 - exposes retina, lamina, visual-projection and descending-neuron telemetry
 - decodes identified descending neurons into a 2-D desktop body: DNg100 + DNa01/DNa02 walking, DNa01/DNa02 steering, DNp01 escape/take-off, DNg02 flight thrust and MDN backward
-- treats the whole desktop as one flat 2-D locomotion plane; no downward gravity/falling model
+- treats screen x/y as a flat desktop locomotion plane and uses a separate virtual altitude axis for take-off/flight/landing; gravity never pulls the fly toward the bottom of the monitor
 - shows only the fly during normal use; clicking it opens a live neural control panel with brain map, motor channels and short logs
 - migrates old edge-stranded state safely, then persists desktop position/heading and control-panel geometry across launches
 - samples raw desktop pixels rather than only tracking the cursor
@@ -81,7 +81,7 @@ A single DNp01/Giant Fiber spike is preserved as an immediate escape/take-off si
 
 Click the fly to open the native resizable control panel. It contains Overview, Brain, Care, Events, Perception and Life tabs. The Perception tab exposes temporal cursor/looming/TTC/optic-flow diagnostics. The persistent organism name can be changed only from the Life tab. Only the Windows title-bar close button is shown; closing the panel hides it without terminating the organism. The panel size and position persist across launches.
 
-The current body is a 2-D kinematic motor decoder, not yet a complete musculoskeletal Drosophila simulation.
+The current body is a 2.5-D kinematic motor decoder: x/y are desktop coordinates while altitude/vertical velocity are independent flight state. Grounded rendering uses an alternating tripod gait derived from locomotor telemetry. It is still not a complete musculoskeletal Drosophila simulation.
 
 ## Feeding
 
