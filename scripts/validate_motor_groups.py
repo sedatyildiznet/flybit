@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 from flybit.neural import FlybitNeuralCore
+from flybit.sensory import DesktopMotionModel
 
 
 REQUIRED = (
@@ -154,7 +155,149 @@ def main() -> int:
             "FAIL: raw retina reaches no translational motor output"
         )
 
-    print("PASS: MaleCNS motor groups and raw-retina decoder are usable")
+    # Controlled temporal-looming assay. First verify that an actually
+    # expanding raw luminance silhouette carries more sustained loom than a
+    # stationary silhouette. No cursor identity or semantic label is used.
+    source_azimuth = np.linspace(
+        -1.0,
+        1.0,
+        384,
+        endpoint=False,
+        dtype=np.float32,
+    )
+
+    def panorama(half_width: float) -> np.ndarray:
+        lum = np.full(
+            len(source_azimuth),
+            0.90,
+            dtype=np.float32,
+        )
+        lum[np.abs(source_azimuth) <= half_width] = 0.06
+        return lum
+
+    static_motion = DesktopMotionModel()
+    static_sum = 0.0
+    t = 0.0
+    for i in range(90):
+        t += 0.020
+        dyn = static_motion.update(
+            body_x=0.0,
+            body_y=0.0,
+            heading=0.0,
+            cursor_x=5000.0,
+            cursor_y=5000.0,
+            luminance=panorama(0.08),
+            timestamp=t,
+        )
+        if i > 3:
+            static_sum += (
+                dyn.retinal_loom_left
+                + dyn.retinal_loom_right
+            )
+
+    expanding_motion = DesktopMotionModel()
+    expanding_frames: list[
+        tuple[np.ndarray, float, float]
+    ] = []
+    expanding_sum = 0.0
+    t = 0.0
+    for i in range(90):
+        phase = i / 89.0
+        width = 0.018 + 0.31 * phase
+        lum = panorama(width)
+        t += 0.020
+        dyn = expanding_motion.update(
+            body_x=0.0,
+            body_y=0.0,
+            heading=0.0,
+            cursor_x=5000.0,
+            cursor_y=5000.0,
+            luminance=lum,
+            timestamp=t,
+        )
+        expanding_sum += (
+            dyn.retinal_loom_left
+            + dyn.retinal_loom_right
+        )
+        expanding_frames.append(
+            (
+                lum,
+                dyn.retinal_loom_left,
+                dyn.retinal_loom_right,
+            )
+        )
+
+    print(
+        "temporal loom signal:",
+        f"static={static_sum:.4f}",
+        f"expanding={expanding_sum:.4f}",
+    )
+    if expanding_sum <= static_sum + 0.05:
+        raise SystemExit(
+            "FAIL: expanding raw silhouette is not distinguished from static"
+        )
+
+    # Run those same raw-luminance frames through a fresh real MaleCNS core.
+    # The modeled boundary may stimulate only LPLC2; escape remains a downstream
+    # property of the measured network plus the existing DN decoder.
+    del core
+    loom_core = FlybitNeuralCore(
+        device="cpu",
+        seed=71,
+    )
+    blank = np.full(
+        len(source_azimuth),
+        0.90,
+        dtype=np.float32,
+    )
+
+    baseline_loom_spikes = 0
+    for _ in range(30):
+        loom_core.set_visual_motion(0.0, 0.0)
+        snap = loom_core.step_visual_luminance(
+            blank,
+            source_azimuth,
+        )
+        baseline_loom_spikes += snap.looming_spikes
+
+    expanding_loom_spikes = 0
+    expanding_escape = 0.0
+    for lum, loom_left, loom_right in expanding_frames:
+        loom_core.set_visual_motion(
+            loom_left,
+            loom_right,
+        )
+        snap = loom_core.step_visual_luminance(
+            lum,
+            source_azimuth,
+        )
+        expanding_loom_spikes += snap.looming_spikes
+        expanding_escape = max(
+            expanding_escape,
+            snap.motor.escape,
+        )
+
+    baseline_rate = baseline_loom_spikes / 30.0
+    expanding_rate = expanding_loom_spikes / len(expanding_frames)
+    print(
+        "real MaleCNS looming assay:",
+        f"LPLC2 baseline/frame={baseline_rate:.3f}",
+        f"expanding/frame={expanding_rate:.3f}",
+        f"escape_max={expanding_escape:.4f}",
+    )
+    if expanding_rate <= baseline_rate:
+        raise SystemExit(
+            "FAIL: expanding raw retina does not increase LPLC2 activity"
+        )
+    if expanding_escape <= 0.0:
+        raise SystemExit(
+            "FAIL: expanding raw retina produces no DNp01 escape output"
+        )
+
+    print(
+        "PASS: MaleCNS motor groups, retinal looming and raw-retina decoder "
+        "are usable"
+    )
     return 0
 
 
