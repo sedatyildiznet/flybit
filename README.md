@@ -21,18 +21,21 @@ No `if mouse_near: escape()`, no scripted wandering presented as neural behaviou
 
 ## Current state
 
-The first Flybit foundation is intentionally conservative:
+Flybit currently:
 
 - loads the full MaleCNS network used by `fly.ai`
-- 166,700 neurons
-- 25,582,938 connectome connections
-- uses the raw visual route into 6,006 photoreceptors
-- shows live whole-network and descending-neuron activity
-- does **not** bypass the eye with the upstream `FeatureDetectors` shortcut
+- runs 166,700 neurons and 25,582,938 measured connectome connections
+- projects the desktop scene into 6,006 MaleCNS photoreceptors
+- models R1-6, R7, R8 and L1/L2/L3 as graded visual cells
+- propagates their signed analog state through the measured MaleCNS connections
+- keeps the remaining network on the upstream spiking dynamics
+- does **not** use the `FeatureDetectors` shortcut in the desktop organism path
+- exposes retina, lamina, visual-projection and descending-neuron telemetry
 - does **not** fake locomotion before a biological motor/body bridge exists
 - builds a Windows executable through GitHub Actions
+- runs a separate real-MaleCNS graded-vision validation workflow
 
-The upstream simulator is still a simplified neural model. MaleCNS is a measured wiring diagram, but the current dynamics do not yet reproduce every biological mechanism such as graded signalling, receptor-specific transmitter effects, neuromodulation or plasticity.
+The mixed visual model fixes a structural limitation of the upstream all-spiking approximation, but it is still not a complete biophysical simulation. The graded time constants and transfer scale are computational parameters, not fitted membrane models.
 
 ## Windows
 
@@ -54,12 +57,26 @@ pip install -e ".[desktop]"
 python -m flybit
 ```
 
-The first launch initializes the MaleCNS neural core. Move the mouse across the display and Flybit maps its horizontal position into the raw photoreceptor scene while showing neural activity.
+Move the mouse across the display. Its position is rendered as a dark target in the compound-eye scene. Flybit converts that scene to adapting photoreceptor contrast and passes it through the mixed graded/spiking MaleCNS network.
+
+## Validation
+
+Run the small deterministic tests:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+With the MaleCNS data available, validate the real early visual relay:
+
+```bash
+python scripts/validate_graded_vision.py
+```
 
 ## Roadmap
 
 1. Neural foundation and reproducible Windows builds
-2. Graded early visual-system modelling
+2. Graded early visual-system modelling and validation
 3. MaleCNS/VNC motor output to biomechanical Drosophila body
 4. Closed-loop desktop movement with no behaviour controller
 5. Olfactory, gustatory and mechanosensory world inputs
