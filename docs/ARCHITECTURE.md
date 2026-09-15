@@ -88,6 +88,10 @@ raw desktop pixels
 
 The screen sampler performs luminance downsampling only. It does not identify windows, text, objects, motion classes or threats. The cursor is rendered into the retinal panorama as a silhouette because platform screen capture commonly omits the hardware pointer.
 
+The desktop retina targets a 20 ms cadence. To keep this practical, capture is restricted to the local region actually reached by the six retinal radii instead of copying the complete display. Because cursor angular width is computed from physical screen geometry, an approaching cursor occupies progressively more angular bins and therefore produces real temporal looming in the retinal stream.
+
+A separate temporal observer computes cursor distance, velocity, acceleration, closing speed, angular growth, TTC and whole-field optic flow for validation/debugging. These values are not movement commands. A modeled near-field disturbance value is also exposed but remains telemetry-only until a defensible MaleCNS mechanosensory receptor mapping is available.
+
 ## Roadmap
 
 1. **Neural foundation** — complete.
@@ -162,6 +166,9 @@ and restores metabolic energy.
 
 Each persistent organism has a wall-clock birth timestamp, deterministic
 individual phenotype, finite modeled lifespan, metabolic energy and vitality.
+Activity, boldness and curiosity now modulate global neural tonic/noise/arousal
+statistics symmetrically; they do not directly choose steering, escape or
+feeding actions.
 Ageing and energy can reduce body capacity. These are computational organism
 states; they must not be described as literal biological immortality or a
 complete living animal.
@@ -172,3 +179,11 @@ The 2-D body now exposes speed, acceleration, turn rate, gait phase, estimated
 wingbeat rate and locomotor load. This does not yet replace the kinematic body
 with a full musculoskeletal Drosophila model, but it creates the instrumentation
 needed to validate that future biomechanical layer.
+
+
+## Persistent organism identity
+
+Each organism may have a compact persistent display name. The name is cosmetic
+identity only: it has no neural or behavioural effect. It can be edited only
+from the native control panel's Life tab; the fly context menu does not expose
+a rename action.
