@@ -29,7 +29,8 @@ Flybit currently:
 - models R1-6, R7, R8 and L1/L2/L3 as graded visual cells
 - propagates their signed analog state through the measured MaleCNS connections
 - keeps the remaining network on the upstream spiking dynamics
-- does **not** use the `FeatureDetectors` shortcut in the desktop organism path
+- does **not** use the upstream task-oriented `FeatureDetectors` shortcut in the desktop organism path
+- derives left/right temporal looming from raw luminance expansion and applies that modeled optic-lobe cue only to identified LPLC2 visual-projection cells; descending motor neurons are never stimulated directly
 - exposes retina, lamina, visual-projection and descending-neuron telemetry
 - decodes identified descending neurons into a 2-D desktop body: DNg100 + DNa01/DNa02 walking, DNa01/DNa02 steering, DNp01 escape/take-off, DNg02 flight thrust and MDN backward
 - treats screen x/y as a flat desktop locomotion plane and uses a separate virtual altitude axis for take-off/flight/landing; gravity never pulls the fly toward the bottom of the monitor
@@ -74,7 +75,7 @@ pip install -e ".[desktop]"
 python -m flybit
 ```
 
-During normal use Flybit appears as a small always-on-top fly moving across the desktop plane. The screen is sampled as raw luminance rays around the fly (384 angular bins across six radii) on a 20 ms target cadence and interpolated onto the MaleCNS photoreceptors. The sampler captures only the local retinal neighbourhood needed by those rays, avoiding repeated full-screen copies. The retinal path itself still has no OCR or threat classifier. A separate OS-level semantic perception layer labels coarse desktop entities (cursor, windows, native Win32 buttons and common applications) for sensory context and telemetry; labels never map directly to movement commands.
+During normal use Flybit appears as a small always-on-top fly moving across the desktop plane. The screen is sampled as raw luminance rays around the fly (384 angular bins across six radii) on a 20 ms target cadence and interpolated onto the MaleCNS photoreceptors. The sampler captures only the local retinal neighbourhood needed by those rays, avoiding repeated full-screen copies. The retinal path has no OCR, cursor identity or semantic threat classifier. A modeled temporal-motion boundary detects dark retinal expansion from consecutive raw luminance frames and transduces it into identified LPLC2 visual-projection cells; all downstream propagation remains in MaleCNS. A separate OS-level semantic perception layer labels coarse desktop entities (cursor, windows, native Win32 buttons and common applications) for sensory context and telemetry; labels never map directly to movement commands.
 
 Windows, icons, text, images, video and other visible screen content can therefore change retinal input directly. The hardware cursor is added as a retinal silhouette because normal screen capture often omits it. Its angular extent grows naturally as it approaches Flybit, producing a temporal looming stimulus in the same retinal stream. Cursor distance, TTC and the observer threat score are telemetry only and never call an escape routine directly. A near-field disturbance value is also measured, but is intentionally not injected into MaleCNS until receptor-level mechanosensory mapping is validated.
 
