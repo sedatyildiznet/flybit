@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMenu,
     QPlainTextEdit,
     QProgressBar,
@@ -48,7 +49,7 @@ from .motion import (
     MotorActivity,
 )
 from .neural import FlybitNeuralCore, NeuralSnapshot
-from .state import load_state, save_state
+from .state import load_state, normalize_display_name, save_state
 from .vision import DesktopRetinaSampler
 
 
@@ -564,6 +565,7 @@ class ControlPanel(QWidget):
 
     closed = Signal()
     feed_requested = Signal()
+    name_changed = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -584,11 +586,11 @@ class ControlPanel(QWidget):
 
         header = QHBoxLayout()
         title_box = QVBoxLayout()
-        title = QLabel("FLYBIT")
-        title.setObjectName("title")
+        self.title = QLabel("FLYBIT")
+        self.title.setObjectName("title")
         subtitle = QLabel("MaleCNS desktop organism")
         subtitle.setObjectName("muted")
-        title_box.addWidget(title)
+        title_box.addWidget(self.title)
         title_box.addWidget(subtitle)
         header.addLayout(title_box)
         header.addStretch()
@@ -774,6 +776,12 @@ class ControlPanel(QWidget):
         self.perception_summary.setWordWrap(True)
         self.perception_summary.setObjectName("muted")
         perception_layout.addWidget(self.perception_summary)
+        self.sensory_summary = QLabel(
+            "Temporal vision · waiting for retinal motion samples…"
+        )
+        self.sensory_summary.setWordWrap(True)
+        self.sensory_summary.setObjectName("muted")
+        perception_layout.addWidget(self.sensory_summary)
         self.perception_log = QPlainTextEdit()
         self.perception_log.setReadOnly(True)
         self.perception_log.setObjectName("log")
@@ -795,6 +803,21 @@ class ControlPanel(QWidget):
         life_title = QLabel("LIFE HISTORY & PHENOTYPE")
         life_title.setObjectName("section")
         life_layout.addWidget(life_title)
+
+        name_label = QLabel("ORGANISM NAME")
+        name_label.setObjectName("muted")
+        life_layout.addWidget(name_label)
+        self.name_edit = QLineEdit()
+        self.name_edit.setMaxLength(32)
+        self.name_edit.setPlaceholderText("Flybit")
+        self.name_edit.setToolTip(
+            "The organism can only be named from this control panel."
+        )
+        self.name_edit.editingFinished.connect(
+            lambda: self.name_changed.emit(self.name_edit.text())
+        )
+        life_layout.addWidget(self.name_edit)
+
         self.life_age = QLabel("Age · —")
         self.life_span = QLabel("Expected lifespan · —")
         self.life_sex = QLabel("Sex · Male")
@@ -917,6 +940,17 @@ class ControlPanel(QWidget):
                 background: #64d6ef;
                 border-radius: 4px;
             }
+            QLineEdit {
+                background: #0b1016;
+                border: 1px solid #2a3542;
+                border-radius: 7px;
+                color: #eef5fa;
+                padding: 7px 9px;
+                selection-background-color: #1f8fb0;
+            }
+            QLineEdit:focus {
+                border-color: #4ab6d2;
+            }
             #log {
                 background: #090c10;
                 border: 1px solid #252f3a;
@@ -974,6 +1008,13 @@ class ControlPanel(QWidget):
         root.addLayout(row)
         return bar
 
+    def set_name(self, name: str) -> None:
+        clean = normalize_display_name(name)
+        self.title.setText(clean.upper())
+        self.setWindowTitle(f"{clean} · Flybit Neural Control")
+        if not self.name_edit.hasFocus():
+            self.name_edit.setText(clean)
+
     def set_ready(self, info: dict) -> None:
         self.status.setText("● MALECNS ONLINE")
         self.neurons.value_label.setText(f"{int(info['neurons']):,}")
@@ -1030,6 +1071,24 @@ class ControlPanel(QWidget):
             "Move sugar…"
             if food_active
             else "Place sugar…"
+        )
+
+    def update_sensory(self, dynamics) -> None:
+        if dynamics is None:
+            return
+        ttc = (
+            f"{dynamics.time_to_collision * 1000.0:.0f} ms"
+            if dynamics.time_to_collision is not None
+            else "—"
+        )
+        self.sensory_summary.setText(
+            f"Cursor {dynamics.cursor_distance:.0f}px · "
+            f"speed {dynamics.cursor_speed:.0f}px/s · "
+            f"closing {dynamics.closing_speed:.0f}px/s · "
+            f"loom {dynamics.looming_rate:.3f}rad/s · "
+            f"TTC {ttc} · optic flow {dynamics.optic_flow:+.3f}rev/s · "
+            f"near-field {dynamics.mechanosensory_disturbance:.2f} · "
+            f"observer salience {dynamics.threat_salience:.2f}"
         )
 
     def update_perception(
@@ -1119,6 +1178,10 @@ class FlybitWindow(QObject):
         self.fly = FlyOverlay()
         self.fly.setWindowIcon(flybit_icon())
         self.panel = ControlPanel()
+        self.panel.set_name(self.state.display_name)
+        self.fly.setToolTip(
+            f"{self.state.display_name} · click for neural control panel"
+        )
         if (
             self.state.panel_w is not None
             and self.state.panel_h is not None
@@ -1165,6 +1228,7 @@ class FlybitWindow(QObject):
         )
         self.latest_motor = MotorActivity()
         self.latest_snapshot: NeuralSnapshot | None = None
+        self.latest_sensory = None
         self._last_log: dict[str, float] = {}
 
         self._brain_thread = QThread(self)
@@ -1184,6 +1248,9 @@ class FlybitWindow(QObject):
         self.panel.feed_requested.connect(
             self._begin_food_placement
         )
+        self.panel.name_changed.connect(
+            self._rename_organism
+        )
         self.food_placement.placed.connect(
             self._place_food_at
         )
@@ -1195,7 +1262,8 @@ class FlybitWindow(QObject):
         self._physics_timer.start()
 
         self._vision_timer = QTimer(self)
-        self._vision_timer.setInterval(80)
+        self._vision_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._vision_timer.setInterval(20)
         self._vision_timer.timeout.connect(self._capture_scene)
         self._vision_timer.start()
         self._capture_scene()
@@ -1245,13 +1313,17 @@ class FlybitWindow(QObject):
             if food is not None
             else None
         )
-        luminance = self.vision.sample(
+        cursor = QCursor.pos()
+        luminance, dynamics = self.vision.sample_with_dynamics(
             x=body.x,
             y=body.y,
             heading=body.heading,
-            cursor=QCursor.pos(),
+            cursor=cursor,
             food=food_point,
         )
+        self.latest_sensory = dynamics
+        if self.panel.isVisible() and dynamics is not None:
+            self.panel.update_sensory(dynamics)
         self.scene_changed.emit(luminance, self.vision.azimuth)
 
     @Slot()
@@ -1347,6 +1419,20 @@ class FlybitWindow(QObject):
         )
         self._refresh_care()
         self._capture_scene()
+
+    @Slot(str)
+    def _rename_organism(self, name: str) -> None:
+        clean = normalize_display_name(name)
+        if clean == self.state.display_name:
+            self.panel.set_name(clean)
+            return
+        self.state.display_name = clean
+        self.panel.set_name(clean)
+        self.fly.setToolTip(
+            f"{clean} · click for neural control panel"
+        )
+        self.panel.append_log(f"organism renamed · {clean}")
+        save_state(self.state)
 
     @Slot()
     def _refresh_care(self) -> None:
@@ -1448,6 +1534,9 @@ class FlybitWindow(QObject):
                 self.latest_snapshot,
                 airborne=self.kinematics.state.airborne,
             )
+        if self.latest_sensory is not None:
+            self.panel.update_sensory(self.latest_sensory)
+        self.panel.set_name(self.state.display_name)
         self._refresh_care()
 
         bounds = self._desktop_bounds()
