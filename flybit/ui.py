@@ -66,6 +66,7 @@ class BrainWorker(QObject):
         self._target_width = 0.035
         self._scene_luminance = None
         self._scene_azimuth = None
+        self._sensory_dynamics = None
         self._timer: QTimer | None = None
         self._core: FlybitNeuralCore | None = None
         self._hunger_drive = 0.0
@@ -87,6 +88,7 @@ class BrainWorker(QObject):
                     "device": self._core.device,
                     "neurons": self._core.neuron_count,
                     "graded": self._core.graded_cell_count,
+                    "looming_cells": self._core.looming_cell_count,
                     "restored": self._core.restored_state,
                 }
             )
@@ -121,14 +123,16 @@ class BrainWorker(QObject):
             min(0.75, float(width)),
         )
 
-    @Slot(object, object)
+    @Slot(object, object, object)
     def set_scene(
         self,
         luminance,
         azimuth,
+        dynamics,
     ) -> None:
         self._scene_luminance = luminance
         self._scene_azimuth = azimuth
+        self._sensory_dynamics = dynamics
 
     @Slot(float, float, float, float, float, float)
     def set_homeostasis(
@@ -165,6 +169,13 @@ class BrainWorker(QObject):
                 self._curiosity_trait,
                 self._rest_drive,
             )
+            if self._sensory_dynamics is not None:
+                self._core.set_visual_motion(
+                    self._sensory_dynamics.retinal_loom_left,
+                    self._sensory_dynamics.retinal_loom_right,
+                )
+            else:
+                self._core.set_visual_motion(0.0, 0.0)
             if (
                 self._scene_luminance is not None
                 and self._scene_azimuth is not None
@@ -1134,6 +1145,8 @@ class ControlPanel(QWidget):
             f"closing {dynamics.closing_speed:.0f}px/s · "
             f"loom {dynamics.looming_rate:.3f}rad/s · "
             f"TTC {ttc} · optic flow {dynamics.optic_flow:+.3f}rev/s · "
+            f"loom L/R {dynamics.retinal_loom_left:.2f}/"
+            f"{dynamics.retinal_loom_right:.2f} · "
             f"near-field {dynamics.mechanosensory_disturbance:.2f} · "
             f"observer salience {dynamics.threat_salience:.2f}"
         )
@@ -1220,7 +1233,7 @@ class ControlPanel(QWidget):
 class FlybitWindow(QObject):
     """Application controller; only the organism is visible by default."""
 
-    scene_changed = Signal(object, object)
+    scene_changed = Signal(object, object, object)
     homeostasis_changed = Signal(float, float, float, float, float, float)
     persist_neural = Signal()
 
@@ -1384,7 +1397,11 @@ class FlybitWindow(QObject):
         self.latest_sensory = dynamics
         if self.panel.isVisible() and dynamics is not None:
             self.panel.update_sensory(dynamics)
-        self.scene_changed.emit(luminance, self.vision.azimuth)
+        self.scene_changed.emit(
+            luminance,
+            self.vision.azimuth,
+            dynamics,
+        )
 
     @Slot()
     def _tick(self) -> None:
@@ -1553,6 +1570,10 @@ class FlybitWindow(QObject):
         )
         self.panel.append_log(
             "raw desktop panorama online · 384 angular bins"
+        )
+        self.panel.append_log(
+            "modeled retinal looming → LPLC2 · "
+            f"{int(info.get('looming_cells', 0))} cells"
         )
         self._refresh_care()
 
