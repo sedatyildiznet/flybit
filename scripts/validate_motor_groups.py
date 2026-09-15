@@ -92,7 +92,61 @@ def main() -> int:
             "FAIL: DNg02 activity produces no flight-thrust drive"
         )
 
-    print("PASS: MaleCNS motor groups and decoder are usable")
+    # End-to-end raw-retina challenge. This uses the same graded eye route as
+    # the desktop app and deliberately avoids FeatureDetectors. A moving,
+    # expanding dark object must produce some translational motor output;
+    # otherwise Flybit can rotate in place while never actually moving.
+    max_forward = 0.0
+    max_backward = 0.0
+    max_escape = 0.0
+    max_flight = 0.0
+    max_steer = 0.0
+
+    # Adapt to blank background.
+    for _ in range(20):
+        snap = core.step_visual_target(None)
+        max_forward = max(max_forward, snap.motor.forward)
+
+    for i in range(220):
+        phase = i / 219.0
+        center = -0.72 + 1.44 * phase
+        # Slow expansion over the sweep creates natural retinal looming while
+        # remaining pure image geometry.
+        half_width = 0.025 + 0.30 * phase
+        snap = core.step_visual_target(
+            center,
+            half_width,
+        )
+        max_forward = max(max_forward, snap.motor.forward)
+        max_backward = max(max_backward, snap.motor.backward)
+        max_escape = max(max_escape, snap.motor.escape)
+        max_flight = max(max_flight, snap.motor.flight)
+        max_steer = max(
+            max_steer,
+            abs(snap.motor.steering),
+        )
+
+    print(
+        "raw-retina max motor:",
+        f"forward={max_forward:.4f}",
+        f"backward={max_backward:.4f}",
+        f"escape={max_escape:.4f}",
+        f"flight={max_flight:.4f}",
+        f"steer={max_steer:.4f}",
+    )
+
+    translational = max(
+        max_forward,
+        max_backward,
+        max_escape,
+        max_flight,
+    )
+    if translational <= 0.005:
+        raise SystemExit(
+            "FAIL: raw retina reaches no translational motor output"
+        )
+
+    print("PASS: MaleCNS motor groups and raw-retina decoder are usable")
     return 0
 
 
