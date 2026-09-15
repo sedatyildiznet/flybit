@@ -458,6 +458,86 @@ class FoodOverlay(QWidget):
             p.drawEllipse(QRectF(x, y, 3, 3))
 
 
+class FoodPlacementOverlay(QWidget):
+    """Temporary full-desktop click target for placing food."""
+
+    placed = Signal(object)
+    cancelled = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowFlags(
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setAttribute(
+            Qt.WidgetAttribute.WA_TranslucentBackground
+        )
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def begin(
+        self,
+        bounds: tuple[float, float, float, float],
+    ) -> None:
+        left, top, right, bottom = bounds
+        self.setGeometry(
+            int(left),
+            int(top),
+            max(1, int(right - left)),
+            max(1, int(bottom - top)),
+        )
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.setFocus()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.fillRect(self.rect(), QColor(5, 8, 12, 26))
+
+        box = QRectF(
+            self.width() / 2 - 175,
+            28,
+            350,
+            46,
+        )
+        p.setPen(QPen(QColor(74, 91, 109), 1))
+        p.setBrush(QColor(13, 17, 23, 235))
+        p.drawRoundedRect(box, 12, 12)
+        p.setPen(QColor(230, 237, 243))
+        p.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        p.drawText(
+            box,
+            Qt.AlignmentFlag.AlignCenter,
+            "Click anywhere to place sugar  ·  Esc to cancel",
+        )
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            point = event.globalPosition().toPoint()
+            self.hide()
+            self.placed.emit(point)
+            event.accept()
+            return
+        if event.button() == Qt.MouseButton.RightButton:
+            self.hide()
+            self.cancelled.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Escape:
+            self.hide()
+            self.cancelled.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 class ControlPanel(QWidget):
     """Resizable native Windows control panel."""
 
@@ -619,7 +699,7 @@ class ControlPanel(QWidget):
         self.last_feed_label.setObjectName("muted")
         care_layout.addWidget(self.last_feed_label)
 
-        self.feed_button = QPushButton("Drop sugar at cursor")
+        self.feed_button = QPushButton("Place sugar…")
         self.feed_button.setObjectName("primary")
         self.feed_button.clicked.connect(self.feed_requested.emit)
         care_layout.addWidget(self.feed_button)
@@ -850,9 +930,9 @@ class ControlPanel(QWidget):
             f"Last feed · {last_feed or 'never'}"
         )
         self.feed_button.setText(
-            "Move sugar to cursor"
+            "Move sugar…"
             if food_active
-            else "Drop sugar at cursor"
+            else "Place sugar…"
         )
 
     def append_log(self, message: str) -> None:
@@ -886,6 +966,7 @@ class FlybitWindow(QObject):
         self.fly.setWindowIcon(flybit_icon())
         self.panel = ControlPanel()
         self.food_overlay = FoodOverlay()
+        self.food_placement = FoodPlacementOverlay()
         self.vision = DesktopRetinaSampler()
         self.surfaces = []
 
@@ -929,7 +1010,12 @@ class FlybitWindow(QObject):
 
         self.fly.clicked.connect(self.toggle_panel)
         self.fly.context_requested.connect(self._context_menu)
-        self.panel.feed_requested.connect(self._drop_food)
+        self.panel.feed_requested.connect(
+            self._begin_food_placement
+        )
+        self.food_placement.placed.connect(
+            self._place_food_at
+        )
 
         self._physics_timer = QTimer(self)
         self._physics_timer.setTimerType(Qt.TimerType.PreciseTimer)
@@ -1041,11 +1127,23 @@ class FlybitWindow(QObject):
         )
 
     @Slot()
-    def _drop_food(self) -> None:
-        point = QCursor.pos()
+    def _begin_food_placement(self) -> None:
+        self.panel.hide()
+        self.food_placement.begin(
+            self._desktop_bounds()
+        )
+
+    @Slot(object)
+    def _place_food_at(self, point: QPoint) -> None:
         bounds = self._desktop_bounds()
-        x = min(bounds[2] - 24.0, max(bounds[0] + 24.0, float(point.x())))
-        y = min(bounds[3] - 24.0, max(bounds[1] + 24.0, float(point.y())))
+        x = min(
+            bounds[2] - 24.0,
+            max(bounds[0] + 24.0, float(point.x())),
+        )
+        y = min(
+            bounds[3] - 24.0,
+            max(bounds[1] + 24.0, float(point.y())),
+        )
         food = self.care.place_food(x, y)
         self.food_overlay.set_center(food.x, food.y)
         self.food_overlay.show()
@@ -1159,7 +1257,7 @@ class FlybitWindow(QObject):
         menu = QMenu()
         menu.setWindowIcon(flybit_icon())
         open_action = menu.addAction("Open neural control panel")
-        feed_action = menu.addAction("Drop sugar at cursor")
+        feed_action = menu.addAction("Place sugar…")
         menu.addSeparator()
         exit_action = menu.addAction("Exit Flybit")
         chosen = menu.exec(point)
@@ -1167,7 +1265,7 @@ class FlybitWindow(QObject):
             if not self.panel.isVisible():
                 self.toggle_panel()
         elif chosen is feed_action:
-            self._drop_food()
+            self._begin_food_placement()
         elif chosen is exit_action:
             QApplication.quit()
 
@@ -1187,6 +1285,7 @@ class FlybitWindow(QObject):
         self._care_timer.stop()
         self._save_timer.stop()
         self.food_overlay.hide()
+        self.food_placement.hide()
         if self._brain_thread.isRunning():
             self._brain_thread.quit()
             self._brain_thread.wait(2500)
