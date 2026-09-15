@@ -5,7 +5,7 @@ from PyInstaller.utils.hooks import collect_submodules
 hiddenimports = collect_submodules("scipy") + collect_submodules("numba") + collect_submodules("flybrain")
 
 analysis = Analysis(
-    ["flybit/__main__.py"],
+    ["flybit_app.py"],
     pathex=["."],
     binaries=[],
     datas=[],
