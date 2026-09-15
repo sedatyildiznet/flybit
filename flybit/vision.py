@@ -68,13 +68,38 @@ class DesktopRetinaSampler:
             )
 
         geom = screen.geometry()
-        pixmap = screen.grabWindow(0)
+        local_x = x - geom.left()
+        local_y = y - geom.top()
+
+        # Capture only the retinal neighbourhood instead of the full desktop.
+        # At 50 Hz a full-screen copy is unnecessarily expensive; the retina
+        # never samples beyond max(self.radii).
+        pad = max(self.radii) + 4
+        capture_left = max(0, int(math.floor(local_x - pad)))
+        capture_top = max(0, int(math.floor(local_y - pad)))
+        capture_right = min(
+            geom.width(),
+            int(math.ceil(local_x + pad + 1)),
+        )
+        capture_bottom = min(
+            geom.height(),
+            int(math.ceil(local_y + pad + 1)),
+        )
+        capture_width = max(1, capture_right - capture_left)
+        capture_height = max(1, capture_bottom - capture_top)
+
+        pixmap = screen.grabWindow(
+            0,
+            capture_left,
+            capture_top,
+            capture_width,
+            capture_height,
+        )
         image = pixmap.toImage().convertToFormat(
             QImage.Format.Format_RGB32
         )
-
-        local_x = x - geom.left()
-        local_y = y - geom.top()
+        sample_x = local_x - capture_left
+        sample_y = local_y - capture_top
 
         values = np.empty(
             self.bins,
@@ -89,8 +114,8 @@ class DesktopRetinaSampler:
             count = 0
 
             for radius in self.radii:
-                px = int(round(local_x + cs * radius))
-                py = int(round(local_y + sn * radius))
+                px = int(round(sample_x + cs * radius))
+                py = int(round(sample_y + sn * radius))
                 if (
                     0 <= px < image.width()
                     and 0 <= py < image.height()
