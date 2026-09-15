@@ -44,7 +44,7 @@ from .motion import (
 )
 from .neural import FlybitNeuralCore, NeuralSnapshot
 from .state import load_state, save_state
-from .world import Surface, WindowSurfaceScanner
+from .vision import DesktopRetinaSampler
 
 
 class BrainWorker(QObject):
@@ -57,6 +57,8 @@ class BrainWorker(QObject):
         super().__init__()
         self._target_center: float | None = None
         self._target_width = 0.035
+        self._scene_luminance = None
+        self._scene_azimuth = None
         self._timer: QTimer | None = None
         self._core: FlybitNeuralCore | None = None
 
@@ -104,17 +106,34 @@ class BrainWorker(QObject):
             min(0.75, float(width)),
         )
 
+    @Slot(object, object)
+    def set_scene(
+        self,
+        luminance,
+        azimuth,
+    ) -> None:
+        self._scene_luminance = luminance
+        self._scene_azimuth = azimuth
+
     @Slot()
     def _step(self) -> None:
         if self._core is None:
             return
         try:
-            self.snapshot.emit(
-                self._core.step_visual_target(
+            if (
+                self._scene_luminance is not None
+                and self._scene_azimuth is not None
+            ):
+                snap = self._core.step_visual_luminance(
+                    self._scene_luminance,
+                    self._scene_azimuth,
+                )
+            else:
+                snap = self._core.step_visual_target(
                     self._target_center,
                     self._target_width,
                 )
-            )
+            self.snapshot.emit(snap)
         except Exception as exc:
             if self._timer:
                 self._timer.stop()
@@ -408,14 +427,11 @@ class ControlPanel(QWidget):
             "Flybit Neural Control"
         )
         self.setWindowFlags(
-            Qt.WindowType.Tool
-            | Qt.WindowType.FramelessWindowHint
+            Qt.WindowType.Window
             | Qt.WindowType.WindowStaysOnTopHint
         )
-        self.setAttribute(
-            Qt.WidgetAttribute.WA_TranslucentBackground
-        )
-        self.resize(570, 690)
+        self.setMinimumSize(540, 620)
+        self.resize(680, 780)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -483,9 +499,17 @@ class ControlPanel(QWidget):
         metrics.addWidget(self.step, 0, 3)
         root.addLayout(metrics)
 
+        section_row = QHBoxLayout()
         section = QLabel("LIVE BRAIN MAP")
         section.setObjectName("section")
-        root.addWidget(section)
+        section_row.addWidget(section)
+        section_row.addStretch()
+        self.vision_mode = QLabel(
+            "RAW DESKTOP VISION · 384×6"
+        )
+        self.vision_mode.setObjectName("pill")
+        section_row.addWidget(self.vision_mode)
+        root.addLayout(section_row)
 
         self.brain_map = BrainMapWidget()
         root.addWidget(self.brain_map)
@@ -538,9 +562,10 @@ class ControlPanel(QWidget):
         root.addWidget(self.log)
 
         self.footer = QLabel(
-            "Movement is decoded from identified MaleCNS descending neurons. "
-            "Window collision, gravity and rendering are the desktop body model; "
-            "cursor distance never selects an action."
+            "Visual input is sampled from raw desktop pixels plus the cursor "
+            "silhouette. Movement is decoded from identified MaleCNS descending "
+            "neurons on a flat 2-D desktop plane; no mouse-distance rule selects "
+            "an action."
         )
         self.footer.setWordWrap(True)
         self.footer.setObjectName("foot")
@@ -797,7 +822,7 @@ class ControlPanel(QWidget):
 class FlybitWindow(QObject):
     """Application controller; only the fly is visible by default."""
 
-    scene_changed = Signal(float, float)
+    scene_changed = Signal(object, object)
 
     def __init__(self) -> None:
         super().__init__()
@@ -806,8 +831,8 @@ class FlybitWindow(QObject):
 
         self.fly = FlyOverlay()
         self.panel = ControlPanel()
-        self.scanner = WindowSurfaceScanner()
-        self.surfaces: list[Surface] = []
+        self.vision = DesktopRetinaSampler()
+        self.surfaces = []
 
         bounds = self._desktop_bounds()
         left, top, right, bottom = bounds
@@ -847,7 +872,7 @@ class FlybitWindow(QObject):
             self._worker.start
         )
         self.scene_changed.connect(
-            self._worker.set_target
+            self._worker.set_scene
         )
         self._worker.ready.connect(
             self._on_ready
@@ -880,13 +905,13 @@ class FlybitWindow(QObject):
         )
         self._physics_timer.start()
 
-        self._surface_timer = QTimer(self)
-        self._surface_timer.setInterval(350)
-        self._surface_timer.timeout.connect(
-            self._scan_surfaces
+        self._vision_timer = QTimer(self)
+        self._vision_timer.setInterval(80)
+        self._vision_timer.timeout.connect(
+            self._capture_scene
         )
-        self._surface_timer.start()
-        self._scan_surfaces()
+        self._vision_timer.start()
+        self._capture_scene()
 
         self._save_timer = QTimer(self)
         self._save_timer.setInterval(2000)
@@ -933,70 +958,18 @@ class FlybitWindow(QObject):
         )
 
     @Slot()
-    def _scan_surfaces(self) -> None:
-        bounds = self._desktop_bounds()
-        left, _top, right, bottom = bounds
-        surfaces = self.scanner.scan()
-        surfaces.append(
-            Surface(
-                id=-1,
-                left=left,
-                right=right,
-                top=bottom,
-                title="desktop edge",
-            )
-        )
-        self.surfaces = surfaces
-
-    @staticmethod
-    def _wrap_angle(value: float) -> float:
-        return (
-            value + math.pi
-        ) % (2.0 * math.pi) - math.pi
-
-    def _cursor_retina_geometry(
-        self,
-    ) -> tuple[float, float]:
+    def _capture_scene(self) -> None:
         body = self.kinematics.state
-        cursor = QCursor.pos()
-
-        dx = float(cursor.x()) - body.x
-        dy = float(cursor.y()) - body.y
-        distance = max(
-            1.0,
-            math.hypot(dx, dy),
+        luminance = self.vision.sample(
+            x=body.x,
+            y=body.y,
+            heading=body.heading,
+            cursor=QCursor.pos(),
         )
-
-        bearing = math.atan2(dy, dx)
-        relative = self._wrap_angle(
-            bearing - body.heading
+        self.scene_changed.emit(
+            luminance,
+            self.vision.azimuth,
         )
-
-        # MaleCNS eye azimuth is represented in [-1, 1]. This is only
-        # projection geometry, not a threat classifier.
-        center = max(
-            -1.0,
-            min(
-                1.0,
-                relative / math.pi,
-            ),
-        )
-
-        # A constant-size cursor occupies more retinal angle as it approaches,
-        # producing looming naturally in the visual pathway.
-        angular_radius = math.atan2(
-            16.0,
-            distance,
-        )
-        half_width = max(
-            0.008,
-            min(
-                0.70,
-                angular_radius
-                / (math.pi / 2.0),
-            ),
-        )
-        return center, half_width
 
     @Slot()
     def _tick(self) -> None:
@@ -1011,11 +984,11 @@ class FlybitWindow(QObject):
         for event in events:
             if event.kind == "land":
                 self.panel.append_log(
-                    f"physical landing · {event.detail}"
+                    f"flight settled · {event.detail}"
                 )
             elif event.kind == "takeoff":
                 self.panel.append_log(
-                    "DNp01 → take-off impulse"
+                    "DNp01 → planar flight burst"
                 )
             elif event.kind == "fall":
                 self.panel.append_log(
@@ -1032,14 +1005,6 @@ class FlybitWindow(QObject):
             ),
         )
         self._position_overlay()
-
-        center, width = (
-            self._cursor_retina_geometry()
-        )
-        self.scene_changed.emit(
-            center,
-            width,
-        )
 
     def _position_overlay(self) -> None:
         body = self.kinematics.state
@@ -1062,6 +1027,9 @@ class FlybitWindow(QObject):
         )
         self.panel.append_log(
             "R1–R8 / L1–L3 graded vision active"
+        )
+        self.panel.append_log(
+            "raw desktop panorama online · 384 angular bins"
         )
 
     @Slot(object)
@@ -1212,7 +1180,7 @@ class FlybitWindow(QObject):
     def shutdown(self) -> None:
         self._save_position()
         self._physics_timer.stop()
-        self._surface_timer.stop()
+        self._vision_timer.stop()
         self._save_timer.stop()
 
         if self._brain_thread.isRunning():

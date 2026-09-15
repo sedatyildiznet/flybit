@@ -73,25 +73,27 @@ Two validation levels protect the visual relay:
 
 The test deliberately does not require a specific behavioural output. Behaviour should only be claimed after the motor/body loop is connected and validated.
 
-## Desktop v0.1 path
+## Desktop visual path
 
 ```
-Windows cursor
-    -> 1-D compound-eye scene
-    -> graded photoreceptors
+raw desktop pixels
+    -> angular luminance panorama
+    -> interpolation onto 6,006 photoreceptors
+    -> graded R1-R8
     -> graded L1/L2/L3
     -> rest of MaleCNS
-    -> live neural inspector
+    -> descending-neuron motor read-out
+    -> flat 2-D desktop body
 ```
 
-There is still no scripted locomotion.
+The screen sampler performs luminance downsampling only. It does not identify windows, text, objects, motion classes or threats. The cursor is rendered into the retinal panorama as a silhouette because platform screen capture commonly omits the hardware pointer.
 
 ## Roadmap
 
 1. **Neural foundation** — complete.
 2. **Graded early vision** — implemented; real-MaleCNS validation required before release.
-3. **Motor bridge** — map MaleCNS/VNC motor output to a Drosophila biomechanical body without behaviour rules.
-4. **Closed-loop desktop world** — sensory input and body physics feed each other continuously.
+3. **Motor bridge** — identified descending-neuron groups drive the current 2-D desktop body.
+4. **Closed-loop desktop world** — raw screen luminance and planar body physics feed each other continuously; fuller biomechanical coupling remains future work.
 5. **Feeding / mechanosensation** — olfactory, gustatory and mechanosensory transduction from published biology.
 6. **Plasticity** — mushroom-body dopamine-gated learning where experimentally supportable.
 7. **Persistent individual** — persist neural/plastic state across launches.
@@ -112,15 +114,19 @@ Measured/identified descending-neuron groups provide the motor signal:
 - `DNp01` -> escape / take-off impulse
 - `MDN` -> backward locomotor drive
 
-The environment contributes only physical quantities: gravity, drag, desktop boundaries and visible Win32 window top edges as collision/landing surfaces.
+The whole desktop is one flat locomotion plane. The body decoder has planar drag and desktop boundaries, but no downward gravity, falling or window-edge landing physics.
 
-Cursor approach is represented only as retinal geometry. Its angular size increases as physical distance decreases. There is no `mouse_near -> escape` rule.
+DNp01 starts a short planar flight burst rather than a fake vertical jump. DNa02 is decoded as yaw-only steering, so the rendered body cannot roll or pitch into somersaults.
+
+Descending motor groups are converted to short-window firing-rate estimates before force mapping. This prevents isolated stochastic spikes from becoming full movement commands while preserving sustained neural activity.
+
+Cursor approach and all other visible desktop content enter through the retinal luminance panorama. There is no `mouse_near -> escape` rule.
 
 The mapping from descending-neuron firing to 2-D forces is still a model-defined motor decoder, not a complete fly musculoskeletal model. That distinction is surfaced in the UI and documentation.
 
 ## Desktop UI
 
-Normal mode contains only a small always-on-top fly overlay. Clicking the organism opens the neural control panel. The panel displays:
+Normal mode contains only a small always-on-top fly overlay. Clicking the organism opens a native resizable Windows neural control panel. The panel displays:
 
 - sampled MaleCNS EM-position brain map
 - current spiking activity overlay

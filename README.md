@@ -32,9 +32,11 @@ Flybit currently:
 - does **not** use the `FeatureDetectors` shortcut in the desktop organism path
 - exposes retina, lamina, visual-projection and descending-neuron telemetry
 - decodes identified descending neurons into a 2-D desktop body: DNg100 forward, DNa02 steering, DNp01 escape/take-off and MDN backward
-- treats visible Win32 window top edges as physical landing surfaces
+- treats the whole desktop as one flat 2-D locomotion plane; no downward gravity/falling model
 - shows only the fly during normal use; clicking it opens a live neural control panel with brain map, motor channels and short logs
 - persists desktop position/heading across launches
+- samples raw desktop pixels rather than only tracking the cursor
+- smooths descending-neuron firing into short-window motor rates to prevent single-spike spin artifacts
 - builds a Windows executable through GitHub Actions
 - runs a separate real-MaleCNS graded-vision validation workflow
 
@@ -60,9 +62,13 @@ pip install -e ".[desktop]"
 python -m flybit
 ```
 
-During normal use Flybit appears as a small always-on-top fly moving around the desktop. The mouse cursor is projected into retinal coordinates; as it approaches, its retinal angular size grows. Cursor distance never calls an escape routine directly. If the visual network produces DNp01 escape output, the body decoder generates the take-off impulse.
+During normal use Flybit appears as a small always-on-top fly moving across the desktop plane. The screen is sampled as raw luminance rays around the fly (384 angular bins across six radii) and interpolated onto the MaleCNS photoreceptors. There is no OCR, object detection or threat classifier in this path.
 
-Visible top-level Windows provide physical top-edge surfaces, so the body can fall onto and walk across application windows. Click the fly to open the neural control panel. Right-click it for panel and exit actions.
+Windows, icons, text, images, video and other visible screen content can therefore change retinal input directly. The hardware cursor is added as a retinal silhouette because normal screen capture often omits it. Cursor distance never calls an escape routine directly.
+
+DNp01 activity produces a short planar flight burst with wing animation; there is no fake downward gravity axis. DNg100, DNa02 and MDN remain the forward, steering and backward read-outs. Motor activity is decoded from a short firing-rate window so isolated stochastic spikes do not cause abrupt spins.
+
+Click the fly to open the neural control panel. The panel uses a native resizable Windows frame and can be resized from its edges/corners.
 
 The current body is a 2-D kinematic motor decoder, not yet a complete musculoskeletal Drosophila simulation.
 

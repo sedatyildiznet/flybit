@@ -2,7 +2,7 @@
 
 World state enters only through sensory transduction. MaleCNS activity is then
 read out as neural telemetry and identified descending-neuron motor channels.
-No mouse/window rule selects a movement here.
+No mouse/window rule selects movement here.
 """
 from __future__ import annotations
 
@@ -93,6 +93,10 @@ class FlybitNeuralCore:
             )
 
         self._brain_xy = self._normalize_brain_positions()
+        self._motor_rates = {
+            name: 0.0
+            for name in self.motor_groups
+        }
 
     @property
     def device(self) -> str:
@@ -229,62 +233,82 @@ class FlybitNeuralCore:
         self,
         fired: np.ndarray,
     ) -> MotorActivity:
-        value = lambda name: self._fraction_fired(
-            fired,
-            self.motor_groups[name],
-        )
-        return MotorActivity(
-            forward_left=value("forward_L"),
-            forward_right=value("forward_R"),
-            steer_left=value("steer_L"),
-            steer_right=value("steer_R"),
-            escape_left=value("escape_L"),
-            escape_right=value("escape_R"),
-            backward_left=value("backward_L"),
-            backward_right=value("backward_R"),
-        )
+        """Decode short-window firing rate from identified descending groups.
 
-    def step_visual_target(
-        self,
-        center: float | None,
-        half_width: float = 0.035,
-    ) -> NeuralSnapshot:
-        """Advance one neural timestep from a raw visual object.
-
-        center and half_width describe retinal geometry only. No looming,
-        target, threat or behaviour classifier is used.
+        A single stochastic spike must not become a full body command. We
+        estimate an exponential firing rate over ~140 ms, then map activity
+        above a quiet baseline into 0..1 motor drive.
         """
-        blobs: list[Blob] = []
-        visual_center = 0.0
-        visual_half_width = 0.0
+        tau = 0.140
+        alpha = 1.0 - np.exp(
+            -float(self.brain.dt) / tau
+        )
 
-        if center is not None:
-            visual_center = float(
-                np.clip(center, -1.0, 1.0)
+        for name, group in self.motor_groups.items():
+            fraction = self._fraction_fired(
+                fired,
+                group,
             )
-            visual_half_width = float(
+            observed_hz = (
+                fraction
+                / max(float(self.brain.dt), 1e-6)
+            )
+            self._motor_rates[name] += (
+                observed_hz
+                - self._motor_rates[name]
+            ) * alpha
+
+        def decode(
+            name: str,
+            baseline_hz: float,
+            span_hz: float,
+        ) -> float:
+            return float(
                 np.clip(
-                    half_width,
-                    0.008,
-                    0.75,
-                )
-            )
-            blobs.append(
-                Blob(
-                    center=visual_center,
-                    half_width=visual_half_width,
-                    darkness=1.0,
+                    (
+                        self._motor_rates[name]
+                        - baseline_hz
+                    )
+                    / span_hz,
+                    0.0,
+                    1.0,
                 )
             )
 
-        eye_drive = self.eyes.contrast_drive(
-            blobs,
-            dt=self.brain.dt,
-        )
-        fired = self.brain.step(
-            eye_drive=eye_drive
+        return MotorActivity(
+            forward_left=decode(
+                "forward_L", 3.0, 18.0
+            ),
+            forward_right=decode(
+                "forward_R", 3.0, 18.0
+            ),
+            steer_left=decode(
+                "steer_L", 4.0, 18.0
+            ),
+            steer_right=decode(
+                "steer_R", 4.0, 18.0
+            ),
+            escape_left=decode(
+                "escape_L", 10.0, 24.0
+            ),
+            escape_right=decode(
+                "escape_R", 10.0, 24.0
+            ),
+            backward_left=decode(
+                "backward_L", 3.0, 18.0
+            ),
+            backward_right=decode(
+                "backward_R", 3.0, 18.0
+            ),
         )
 
+    def _finish_step(
+        self,
+        fired,
+        *,
+        visual_center: float = 0.0,
+        visual_half_width: float = 0.0,
+    ) -> NeuralSnapshot:
         fired_np = np.asarray(
             fired,
             dtype=np.int64,
@@ -336,10 +360,98 @@ class FlybitNeuralCore:
             ),
             photoreceptor_rms=photoreceptor_rms,
             lamina_rms=lamina_rms,
-            visual_center=visual_center,
-            visual_half_width=visual_half_width,
+            visual_center=float(visual_center),
+            visual_half_width=float(visual_half_width),
             motor=self._motor_activity(fired_np),
             active_brain_points=self._active_points(
                 fired_np
             ),
+        )
+
+    def step_visual_luminance(
+        self,
+        luminance: np.ndarray,
+        source_azimuth: np.ndarray,
+    ) -> NeuralSnapshot:
+        """Advance from a raw angular desktop luminance panorama.
+
+        Both arrays are 1-D. Values are linearly interpolated onto the measured
+        photoreceptor azimuths; no objects/features are recognized here.
+        """
+        lum = np.asarray(
+            luminance,
+            dtype=np.float32,
+        )
+        az = np.asarray(
+            source_azimuth,
+            dtype=np.float32,
+        )
+        if (
+            lum.ndim != 1
+            or az.ndim != 1
+            or len(lum) != len(az)
+            or len(lum) < 2
+        ):
+            raise ValueError(
+                "luminance/source_azimuth must be equal-length 1-D arrays"
+            )
+
+        order = np.argsort(az)
+        receptor_luminance = np.interp(
+            self.brain.azimuth,
+            az[order],
+            lum[order],
+            left=float(lum[order][0]),
+            right=float(lum[order][-1]),
+        ).astype(np.float32)
+
+        eye_drive = self.eyes.contrast_from_luminance(
+            receptor_luminance,
+            dt=self.brain.dt,
+        )
+        fired = self.brain.step(
+            eye_drive=eye_drive
+        )
+        return self._finish_step(fired)
+
+    def step_visual_target(
+        self,
+        center: float | None,
+        half_width: float = 0.035,
+    ) -> NeuralSnapshot:
+        """Compatibility path for simple synthetic retinal blobs."""
+        blobs: list[Blob] = []
+        visual_center = 0.0
+        visual_half_width = 0.0
+
+        if center is not None:
+            visual_center = float(
+                np.clip(center, -1.0, 1.0)
+            )
+            visual_half_width = float(
+                np.clip(
+                    half_width,
+                    0.008,
+                    0.75,
+                )
+            )
+            blobs.append(
+                Blob(
+                    center=visual_center,
+                    half_width=visual_half_width,
+                    darkness=1.0,
+                )
+            )
+
+        eye_drive = self.eyes.contrast_drive(
+            blobs,
+            dt=self.brain.dt,
+        )
+        fired = self.brain.step(
+            eye_drive=eye_drive
+        )
+        return self._finish_step(
+            fired,
+            visual_center=visual_center,
+            visual_half_width=visual_half_width,
         )
