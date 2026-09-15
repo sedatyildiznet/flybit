@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
-from .world import Surface
+from .world import Surface, support_at
 
 
 @dataclass(frozen=True)
@@ -60,6 +60,8 @@ class FlyBodyState:
     flight_energy: float = 0.0
     altitude: float = 0.0
     vertical_velocity: float = 0.0
+    support_id: int | None = 0
+    support_title: str = "Desktop"
 
 
 @dataclass(frozen=True)
@@ -78,6 +80,7 @@ class BiomechanicsSnapshot:
     locomotor_load: float
     altitude: float
     vertical_speed: float
+    support_title: str
 
 
 class FlyKinematics:
@@ -90,8 +93,9 @@ class FlyKinematics:
       MDN    -> backward locomotor drive
       DNg02  -> flight thrust / wing-power drive
 
-    No cursor/window state is read here. The entire desktop is one flat plane.
-    Window contents are visual sensory input, not separate gravity surfaces.
+    No semantic window label chooses behaviour. Visible native-window geometry
+    is used only to identify the substrate under a grounded body. Screen x/y
+    remain one locomotion plane and virtual altitude remains independent.
     """
 
     BODY_HALF_HEIGHT = 9.0
@@ -132,7 +136,6 @@ class FlyKinematics:
         dt: float = 0.020,
         physiology_gain: float = 1.0,
     ) -> list[MotionEvent]:
-        del surfaces  # retained only for API compatibility
         events: list[MotionEvent] = []
         s = self.state
 
@@ -185,6 +188,8 @@ class FlyKinematics:
             and self._escape_prev <= 0.06
         ):
             s.airborne = True
+            s.support_id = None
+            s.support_title = "Air"
             s.flight_energy = max(
                 s.flight_energy,
                 0.55 + self._escape * 0.75,
@@ -363,6 +368,35 @@ class FlyKinematics:
         if hit_left or hit_right or hit_top or hit_bottom:
             s.angular_velocity *= 0.25
 
+        # Resolve physical contact after planar movement. Window identity is
+        # contact telemetry only; it never changes velocity, heading or choice.
+        if s.airborne and s.altitude > 0.5:
+            next_support_id = None
+            next_support_title = "Air"
+        else:
+            support = support_at(surfaces, s.x, s.y)
+            next_support_id = support.id if support is not None else 0
+            next_support_title = (
+                (support.title or "Window")
+                if support is not None
+                else "Desktop"
+            )
+
+        if (
+            next_support_id != s.support_id
+            or next_support_title != s.support_title
+        ):
+            previous = s.support_title
+            s.support_id = next_support_id
+            s.support_title = next_support_title
+            if next_support_title != "Air":
+                events.append(
+                    MotionEvent(
+                        "surface_contact",
+                        f"{previous} -> {next_support_title}",
+                    )
+                )
+
         return events
 
 
@@ -377,4 +411,5 @@ class FlyKinematics:
             locomotor_load=float(self._locomotor_load),
             altitude=float(self.state.altitude),
             vertical_speed=float(self.state.vertical_velocity),
+            support_title=str(self.state.support_title),
         )
