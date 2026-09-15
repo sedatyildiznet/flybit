@@ -219,3 +219,17 @@ Conversely, when the nervous system itself produces DN escape output, a
 short-lived threat-arousal state rises and decays over seconds. That state
 modulates global neural tonic/noise/readiness only; it cannot trigger an escape
 on its own. This gives post-escape sensitization without a mouse-near rule.
+
+
+## Native window substrate contact
+
+Visible external top-level Win32 windows are periodically scanned as rectangular
+substrates while preserving their native Z-order. When Flybit is grounded, the
+topmost rectangle under its current desktop coordinate is recorded as physical
+contact context; otherwise the support is the desktop plane. While airborne the
+support is explicitly Air.
+
+This contact model does not apply app-specific friction, attraction, avoidance
+or steering. Window titles are observer metadata only and cannot choose
+behaviour. The geometry exists so landing/contact telemetry follows the current
+desktop instead of the old unused surface placeholder.

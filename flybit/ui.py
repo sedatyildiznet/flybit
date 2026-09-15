@@ -54,6 +54,7 @@ from .neural import FlybitNeuralCore, NeuralSnapshot
 from .olfaction import FoodOdorModel
 from .state import load_state, normalize_display_name, save_state
 from .vision import DesktopRetinaSampler
+from .world import WindowSurfaceScanner
 
 
 class BrainWorker(QObject):
@@ -1152,7 +1153,8 @@ class ControlPanel(QWidget):
         self.neural_detail.setText(
             f"retina rms {snap.photoreceptor_rms:.3f}   "
             f"lamina rms {snap.lamina_rms:.3f}   "
-            f"visual projection {snap.visual_projection_spikes:,} spikes"
+            f"visual projection {snap.visual_projection_spikes:,} spikes   "
+            f"LPLC2 loom {snap.looming_spikes:,}"
         )
         self.brain_map.set_active(snap.active_brain_points)
         self.forward.setValue(min(100, int(snap.motor.forward * 100)))
@@ -1275,7 +1277,8 @@ class ControlPanel(QWidget):
             f"gait {biomechanics.gait_phase:.2f} · "
             f"wingbeat {biomechanics.wingbeat_hz:.0f}Hz · "
             f"altitude {biomechanics.altitude:.1f} · "
-            f"vertical {biomechanics.vertical_speed:+.1f}"
+            f"vertical {biomechanics.vertical_speed:+.1f} · "
+            f"substrate {biomechanics.support_title[:28]}"
         )
         if circadian is not None:
             self.circadian_status.setText(
@@ -1324,6 +1327,7 @@ class FlybitWindow(QObject):
         self.arousal = ThreatArousalModel()
         self.olfaction = FoodOdorModel()
         self.semantic_scanner = DesktopSemanticScanner()
+        self.surface_scanner = WindowSurfaceScanner()
         self.nearby_objects: tuple[PerceivedObject, ...] = ()
 
         self.fly = FlyOverlay()
@@ -1352,7 +1356,7 @@ class FlybitWindow(QObject):
         self.food_overlay = FoodOverlay()
         self.food_placement = FoodPlacementOverlay()
         self.vision = DesktopRetinaSampler()
-        self.surfaces = []
+        self.surfaces = self.surface_scanner.scan()
 
         bounds = self._desktop_bounds()
         left, top, right, bottom = bounds
@@ -1441,6 +1445,7 @@ class FlybitWindow(QObject):
     def show(self) -> None:
         self._position_overlay()
         self.fly.show()
+        self._refresh_perception()
         self._refresh_care()
 
     def _desktop_bounds(
@@ -1537,7 +1542,11 @@ class FlybitWindow(QObject):
                 )
             elif event.kind == "takeoff":
                 self.panel.append_log(
-                    "DNp01 → planar flight burst"
+                    "DNp01 → altitude takeoff"
+                )
+            elif event.kind == "surface_contact":
+                self.panel.append_log(
+                    f"substrate contact · {event.detail}"
                 )
 
         body = self.kinematics.state
@@ -1656,6 +1665,7 @@ class FlybitWindow(QObject):
             body.y,
             limit=12,
         )
+        self.surfaces = self.surface_scanner.scan()
         self.panel.update_perception(self.nearby_objects)
 
     @Slot(object)

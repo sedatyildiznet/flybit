@@ -7,6 +7,7 @@ from flybit.motion import (
     FlyKinematics,
     MotorActivity,
 )
+from flybit.world import Surface
 
 
 class MotionBridgeTest(unittest.TestCase):
@@ -151,6 +152,36 @@ class MotionBridgeTest(unittest.TestCase):
 
         self.assertGreater(body.x, 20.0)
         self.assertGreater(body.y, 15.0)
+
+    def test_grounded_body_reports_window_substrate(self):
+        body = FlyBodyState(
+            x=200.0,
+            y=200.0,
+            heading=0.0,
+        )
+        model = FlyKinematics(body)
+        surface = Surface(
+            id=42,
+            left=100.0,
+            right=400.0,
+            top=100.0,
+            bottom=350.0,
+            title="Test Window",
+            z_order=0,
+        )
+
+        events = model.update(
+            MotorActivity(),
+            [surface],
+            (0.0, 0.0, 800.0, 600.0),
+            dt=0.020,
+        )
+
+        self.assertEqual(body.support_id, 42)
+        self.assertEqual(body.support_title, "Test Window")
+        self.assertTrue(
+            any(event.kind == "surface_contact" for event in events)
+        )
 
     def test_biomechanics_reports_gait_and_load(self):
         body = FlyBodyState(x=200.0, y=200.0, heading=0.0)

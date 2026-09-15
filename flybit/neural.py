@@ -25,6 +25,7 @@ class NeuralSnapshot:
     descending_spikes: int
     descending_active: int
     visual_projection_spikes: int
+    looming_spikes: int
     photoreceptor_rms: float
     lamina_rms: float
     visual_center: float
@@ -114,6 +115,12 @@ class FlybitNeuralCore:
             "L": self._resolve_cells(["LPLC2"], side="L"),
             "R": self._resolve_cells(["LPLC2"], side="R"),
         }
+        self._looming_mask = np.zeros(
+            self.brain.n,
+            dtype=np.bool_,
+        )
+        for group in self.loom_groups.values():
+            self._looming_mask[group] = True
         self._retinal_loom_left = 0.0
         self._retinal_loom_right = 0.0
 
@@ -685,10 +692,14 @@ class FlybitNeuralCore:
             visual_projection_spikes = int(
                 visual_hits.sum()
             )
+            looming_spikes = int(
+                self._looming_mask[fired_np].sum()
+            )
         else:
             descending_spikes = 0
             descending_active = 0
             visual_projection_spikes = 0
+            looming_spikes = 0
 
         photoreceptor_rms = self._rms(
             self.brain.membrane_values(
@@ -709,6 +720,7 @@ class FlybitNeuralCore:
             visual_projection_spikes=(
                 visual_projection_spikes
             ),
+            looming_spikes=looming_spikes,
             photoreceptor_rms=photoreceptor_rms,
             lamina_rms=lamina_rms,
             visual_center=float(visual_center),
