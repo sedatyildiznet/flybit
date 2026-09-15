@@ -1,8 +1,4 @@
-"""Persistent application metadata for Flybit.
-
-Neural-state persistence will be added once the plasticity/state format is
-stable. This file intentionally does not invent personality or behaviour stats.
-"""
+"""Persistent identity and desktop-body state for Flybit."""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -15,10 +11,16 @@ from pathlib import Path
 class FlybitState:
     created_at: str
     launches: int = 0
+    x: float | None = None
+    y: float | None = None
+    heading: float = 0.0
 
     @classmethod
     def new(cls) -> "FlybitState":
-        return cls(created_at=datetime.now(timezone.utc).isoformat(), launches=0)
+        return cls(
+            created_at=datetime.now(timezone.utc).isoformat(),
+            launches=0,
+        )
 
 
 def state_dir() -> Path:
@@ -27,15 +29,46 @@ def state_dir() -> Path:
     return base
 
 
+def _path() -> Path:
+    return state_dir() / "state.json"
+
+
+def save_state(state: FlybitState) -> None:
+    _path().write_text(
+        json.dumps(asdict(state), indent=2),
+        encoding="utf-8",
+    )
+
+
 def load_state() -> FlybitState:
-    path = state_dir() / "state.json"
+    path = _path()
     if not path.exists():
         state = FlybitState.new()
     else:
         try:
-            state = FlybitState(**json.loads(path.read_text(encoding="utf-8")))
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            allowed = {
+                "created_at",
+                "launches",
+                "x",
+                "y",
+                "heading",
+            }
+            state = FlybitState(
+                **{
+                    key: value
+                    for key, value in raw.items()
+                    if key in allowed
+                }
+            )
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            json.JSONDecodeError,
+        ):
             state = FlybitState.new()
+
     state.launches += 1
-    path.write_text(json.dumps(asdict(state), indent=2), encoding="utf-8")
+    save_state(state)
     return state
