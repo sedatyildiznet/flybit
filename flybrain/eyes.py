@@ -78,11 +78,21 @@ class Eyes:
                 f"expected luminance shape {self.azimuth.shape}, got {lum.shape}"
             )
 
-        return self.contrast_from_luminance(
-            lum,
-            dt=dt,
-            adaptation_tau=adaptation_tau,
+        baseline = np.maximum(
+            self.adaptation,
+            np.float32(0.05),
         )
+        contrast = (lum - self.adaptation) / baseline
+
+        tau = max(float(adaptation_tau), float(dt), 1e-6)
+        alpha = np.float32(1.0 - np.exp(-float(dt) / tau))
+        self.adaptation += alpha * (lum - self.adaptation)
+
+        return np.clip(
+            contrast,
+            -1.0,
+            1.0,
+        ).astype(np.float32)
 
     def contrast_drive(
         self,
@@ -101,17 +111,11 @@ class Eyes:
         """
         lum = render(self.azimuth, blobs)
 
-        baseline = np.maximum(
-            self.adaptation,
-            np.float32(0.05),
+        return self.contrast_from_luminance(
+            lum,
+            dt=dt,
+            adaptation_tau=adaptation_tau,
         )
-        contrast = (lum - self.adaptation) / baseline
-
-        tau = max(float(adaptation_tau), float(dt), 1e-6)
-        alpha = np.float32(1.0 - np.exp(-float(dt) / tau))
-        self.adaptation += alpha * (lum - self.adaptation)
-
-        return np.clip(contrast, -1.0, 1.0).astype(np.float32)
 
 
 # Original task-specific shortcut parameters. These remain available to upstream
