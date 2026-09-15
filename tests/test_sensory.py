@@ -94,6 +94,64 @@ class SensoryDynamicsTest(unittest.TestCase):
         self.assertGreater(expanded.retinal_loom_left, 0.0)
         self.assertAlmostEqual(expanded.retinal_loom_right, 0.0)
 
+    def test_repeated_looming_habituates_but_keeps_response(self):
+        model = DesktopMotionModel()
+        narrow = np.full(128, 0.9, dtype=np.float32)
+        wide = narrow.copy()
+        narrow[28:32] = 0.1
+        wide[24:36] = 0.1
+
+        t = 3.0
+        model.update(
+            body_x=0.0,
+            body_y=0.0,
+            heading=0.0,
+            cursor_x=500.0,
+            cursor_y=0.0,
+            luminance=narrow,
+            timestamp=t,
+        )
+        t += 0.020
+        first = model.update(
+            body_x=0.0,
+            body_y=0.0,
+            heading=0.0,
+            cursor_x=500.0,
+            cursor_y=0.0,
+            luminance=wide,
+            timestamp=t,
+        )
+
+        latest = first
+        for _ in range(160):
+            t += 0.020
+            model.update(
+                body_x=0.0,
+                body_y=0.0,
+                heading=0.0,
+                cursor_x=500.0,
+                cursor_y=0.0,
+                luminance=narrow,
+                timestamp=t,
+            )
+            t += 0.020
+            latest = model.update(
+                body_x=0.0,
+                body_y=0.0,
+                heading=0.0,
+                cursor_x=500.0,
+                cursor_y=0.0,
+                luminance=wide,
+                timestamp=t,
+            )
+
+        self.assertGreater(latest.loom_habituation, 0.2)
+        self.assertGreater(latest.retinal_loom_left, 0.0)
+        self.assertLess(
+            latest.retinal_loom_left,
+            first.retinal_loom_left,
+        )
+
     def test_panorama_shift_is_visible_as_optic_flow(self):
         model = DesktopMotionModel()
         x = np.linspace(0.0, 2.0 * np.pi, 128, endpoint=False)
