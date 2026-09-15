@@ -43,6 +43,7 @@ Flybit currently:
 - smooths descending-neuron firing into short-window motor rates to prevent single-spike spin artifacts
 - includes a branded application/EXE icon and a native resizable tabbed Windows control panel
 - includes persistent Care state and physical sugar-drop feeding
+- models a bilateral sugar-associated odor field at virtual antenna positions and displays its gradient/salience; neural olfactory injection stays disabled until receptor identities are validated
 - exposes hunger as an internal homeostatic drive that modulates neural locomotor readiness without choosing direction
 - tracks wall-clock age, finite modeled lifespan, metabolic energy, vitality and stable individual phenotype
 - makes activity, boldness and curiosity alter global neural arousal/intrinsic activity without directly choosing a direction or action
