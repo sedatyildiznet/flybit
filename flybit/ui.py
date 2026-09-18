@@ -1653,9 +1653,10 @@ class FlybitWindow(QObject):
 
         if self.care.contact(body.x, body.y):
             self.life.feed()
+            self.ethology.begin_feeding(1.5)
             self.food_overlay.hide()
             self.panel.append_log(
-                "sugar contact → consumed · nutrition state updated"
+                "sugar contact → feeding bout · nutrition state updated"
             )
             save_state(self.state)
             self._refresh_care()
