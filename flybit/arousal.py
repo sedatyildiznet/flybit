@@ -1,4 +1,4 @@
-"""Short-term threat arousal driven by the organism's own neural escape output."""
+"""Short-term threat arousal from looming perception and neural escape output."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,10 +11,11 @@ class ArousalSnapshot:
 
 
 class ThreatArousalModel:
-    """Sensitization state that follows DN escape activity.
+    """Sensitization state around threat perception and DN escape activity.
 
-    The state never triggers escape itself. It only changes global neural
-    readiness after the nervous system has already produced an escape response.
+    Looming can raise readiness before take-off, while an actual neural escape
+    produces a stronger sensitization pulse. The state still never issues a
+    movement command by itself.
     """
 
     def __init__(self, *, decay_seconds: float = 18.0) -> None:
@@ -25,14 +26,26 @@ class ThreatArousalModel:
     def _clamp01(value: float) -> float:
         return max(0.0, min(1.0, float(value)))
 
-    def tick(self, dt: float, *, escape_drive: float) -> None:
+    def tick(
+        self,
+        dt: float,
+        *,
+        escape_drive: float,
+        sensory_threat: float = 0.0,
+    ) -> None:
         dt = max(0.0, float(dt))
         escape = self._clamp01(escape_drive)
+        sensory = self._clamp01(sensory_threat)
         self._value *= math.exp(-dt / self.decay_seconds)
+        if sensory > 0.0:
+            self._value = max(
+                self._value,
+                self._clamp01(0.10 + 0.62 * sensory),
+            )
         if escape > 0.0:
             self._value = max(
                 self._value,
-                self._clamp01(0.25 + 0.75 * escape),
+                self._clamp01(0.30 + 0.70 * escape),
             )
 
     def snapshot(self) -> ArousalSnapshot:
