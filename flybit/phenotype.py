@@ -26,12 +26,16 @@ class IndividualPhenotype:
     handedness: float
 
 
-def phenotype_from_identity(identity: str) -> IndividualPhenotype:
-    """Return a stable phenotype for a persistent organism identity."""
+def seed_from_identity(identity: str) -> int:
+    """Stable random seed derived from the persistent organism identity."""
     raw = str(identity or "Flybit").encode("utf-8", "replace")
     digest = hashlib.blake2b(raw, digest_size=16, person=b"Flybit-v04").digest()
-    seed = int.from_bytes(digest[:8], "big", signed=False)
-    rng = random.Random(seed)
+    return int.from_bytes(digest[:8], "big", signed=False)
+
+
+def phenotype_from_identity(identity: str) -> IndividualPhenotype:
+    """Return a stable phenotype for a persistent organism identity."""
+    rng = random.Random(seed_from_identity(identity))
 
     return IndividualPhenotype(
         stride_scale=rng.uniform(0.92, 1.08),
