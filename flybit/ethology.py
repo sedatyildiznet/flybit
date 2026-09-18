@@ -217,10 +217,29 @@ class EthologyModel:
         if boundary_drive < 0.28:
             scores["boundary"] -= 0.60
 
-        mode = max(
-            scores,
-            key=lambda key: scores[key] + self.rng.uniform(-0.16, 0.16),
-        )
+        # Competing behaviours are sampled from a softmax rather than
+        # taking a hard winner. This preserves strong drive dominance (sleep
+        # when exhausted, forage when odor/hunger are high) while allowing
+        # lower-probability sharp turns, pauses and grooming bouts to appear
+        # naturally instead of becoming unreachable states.
+        temperature = 0.24
+        peak = max(scores.values())
+        weighted = [
+            (
+                key,
+                math.exp((value - peak) / temperature),
+            )
+            for key, value in scores.items()
+        ]
+        total = sum(weight for _, weight in weighted)
+        roll = self.rng.random() * total
+        mode = weighted[-1][0]
+        cumulative = 0.0
+        for key, weight in weighted:
+            cumulative += weight
+            if roll <= cumulative:
+                mode = key
+                break
 
         pause_scale = self.phenotype.pause_scale
         if mode == "sleep":
