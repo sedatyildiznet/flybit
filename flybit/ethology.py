@@ -44,6 +44,7 @@ class EthologyModel:
         "walk",
         "turn",
         "forage",
+        "feed",
         "groom",
         "sleep",
         "escape",
@@ -78,6 +79,10 @@ class EthologyModel:
         self.bout_remaining = max(0.04, float(seconds))
         if mode in {"walk", "turn"}:
             self._wander_bias = self.rng.uniform(-1.0, 1.0)
+
+    def begin_feeding(self, seconds: float = 1.4) -> None:
+        """Enter a stationary feeding bout after physical food contact."""
+        self._set_mode("feed", max(0.35, float(seconds)))
 
     @staticmethod
     def _max_motor(a: MotorActivity, b: MotorActivity) -> MotorActivity:
@@ -303,7 +308,11 @@ class EthologyModel:
             )
 
         motor = self._max_motor(neural, intent)
-        if self.mode == "sleep" and threat < 0.12 and neural.escape <= 0.0:
+        if (
+            self.mode in {"sleep", "groom", "feed"}
+            and threat < 0.12
+            and neural.escape <= 0.0
+        ):
             motor = MotorActivity(
                 forward_left=(
                     neural.forward_left if neural.forward_left > 0.28 else 0.0
