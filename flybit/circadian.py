@@ -116,6 +116,23 @@ class CircadianModel:
         )
         self._recompute()
 
+    def elapse(self, seconds: float) -> None:
+        """Approximate rest/homeostatic change while the app was closed."""
+        seconds = max(0.0, float(seconds))
+        if seconds <= 0.0:
+            return
+        hours = min(24.0, seconds / 3600.0)
+        # Closed-app time is treated as low-locomotion time. Sleep pressure
+        # relaxes toward a moderate rested baseline instead of freezing.
+        target = 0.28
+        alpha = 1.0 - math.exp(-hours / 5.5)
+        self.state.sleep_pressure = self._clamp01(
+            self.state.sleep_pressure
+            + (target - self.state.sleep_pressure) * alpha
+        )
+        self._local_hour = self._hour_now()
+        self._recompute()
+
     def snapshot(self) -> CircadianSnapshot:
         return CircadianSnapshot(
             local_hour=float(self._local_hour),

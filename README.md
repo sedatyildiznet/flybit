@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/sedatyildiznet/flybit/releases/tag/v0.2.0"><img alt="Release" src="https://img.shields.io/badge/release-v0.2.0-2ea44f"></a>
+  <a href="https://github.com/sedatyildiznet/flybit/releases/tag/v0.3.0"><img alt="Release" src="https://img.shields.io/badge/release-v0.3.0-2ea44f"></a>
   <img alt="Status" src="https://img.shields.io/badge/status-stable-2ea44f">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows-0078D4">
   <img alt="Python" src="https://img.shields.io/badge/python-3.10%2B-3776AB">
@@ -55,9 +55,9 @@ Mouse approach, light, movement, hunger, fatigue and other state changes must in
 
 ---
 
-## v0.2.0 Stable
+## v0.3.0 Stable
 
-**v0.2.0 is the first stable Flybit release.**
+**v0.3.0 is the first stable Flybit release.**
 
 This release combines the neural desktop foundation with the persistent-organism layer introduced during the alpha series.
 
@@ -83,7 +83,7 @@ Major additions include:
 
 Latest stable release:
 
-**[Download Flybit v0.2.0](https://github.com/sedatyildiznet/flybit/releases/tag/v0.2.0)**
+**[Download Flybit v0.3.0](https://github.com/sedatyildiznet/flybit/releases/tag/v0.3.0)**
 
 ---
 
@@ -173,7 +173,7 @@ The graded membrane constants and transfer functions are computational parameter
 
 Flybit continuously samples the desktop around its own body.
 
-Instead of repeatedly copying the entire monitor, v0.2.0 captures only the local retinal neighbourhood required by the six visual sampling radii.
+Instead of repeatedly copying the entire monitor, v0.3.0 captures only the local retinal neighbourhood required by the six visual sampling radii.
 
 Visible desktop content can therefore affect retinal input directly:
 
@@ -263,6 +263,48 @@ temporary threat arousal
       ↓
 global tonic / noise / readiness modulation
 ```
+
+---
+
+# Lifelike ethology layer
+
+v0.3.0 adds an explicit **MODELED ethology/VNC bridge** between descending
+neural output and the desktop body. This exists because a simplified whole-CNS
+LIF model plus a small descending-neuron decoder does not reproduce the full
+behavioural repertoire of a living fly by itself.
+
+The layer never receives application names or semantic commands such as
+`mouse_near`, `seek_food` or `go_left`. It operates on sensory and internal
+quantities already present in the organism:
+
+- left/right retinal expansion
+- modeled near-field disturbance
+- bilateral food odor concentration and gradient
+- hunger
+- sleep/rest pressure
+- threat arousal
+- persistent activity/boldness/curiosity traits
+- MaleCNS descending motor output
+
+Competing semi-Markov motor programmes now include:
+
+- idle / stop
+- walking bouts
+- short turn bouts
+- odor-guided foraging
+- physical feeding bouts
+- grooming
+- quiescent sleep
+- directional escape
+- stabilized post-takeoff flight
+
+MaleCNS motor output is preserved and can override quieter modeled programmes.
+Strong looming can also interrupt sleep, grooming or feeding immediately.
+
+This layer is intentionally labelled **MODELED**, not measured MaleCNS
+physiology. Its purpose is to supply missing behavioural/VNC/body coupling
+without pretending the current connectome simulator already contains every
+biophysical mechanism required for natural behaviour.
 
 ---
 
@@ -508,7 +550,7 @@ Feeding count and last-feed time persist across launches.
 
 ## Modeled food odor
 
-v0.2.0 also includes a synthetic bilateral odor field around the sugar source.
+v0.3.0 also includes a synthetic bilateral odor field around the sugar source.
 
 Two virtual antenna positions sample:
 
@@ -520,34 +562,31 @@ Two virtual antenna positions sample:
 
 This is deliberately labeled **MODELED / SYNTHETIC**.
 
-The signal is **not yet injected into MaleCNS olfactory neurons**, because the bundled runtime metadata does not currently provide the receptor-level mapping required to make that claim responsibly.
+The signal is **not injected into MaleCNS olfactory neurons**, because the bundled runtime metadata does not currently provide the receptor-level mapping required to make that claim responsibly.
 
-The same rule applies to receptor-accurate gustation and mechanosensation.
+In v0.3.0 the bilateral odor field instead feeds the explicitly modeled
+ethology/VNC bridge. A hungry organism can therefore perform gradient-based
+foraging without pretending that the synthetic odor field is receptor-accurate
+MaleCNS physiology. Physical body contact is still required before feeding.
+
+The same scientific boundary applies to receptor-accurate gustation and
+mechanosensation.
 
 ---
 
 # Circadian rest
 
-Flybit maintains a modeled rest physiology rather than using:
+Flybit maintains a modeled wake/rest physiology using local time, ambient
+retinal luminance, homeostatic sleep pressure and recent locomotor load.
 
-```python
-if hour > 23:
-    sleep()
-```
+v0.3.0 converts that physiology into explicit **quiescent sleep bouts** rather
+than only reducing tonic/noise values. Weak stochastic motor leakage is gated
+during sleep, while sufficiently strong retinal looming can wake the organism
+straight into an escape response.
 
-The model combines:
-
-- local time
-- broad morning/evening wake peaks
-- ambient retinal luminance
-- homeostatic sleep pressure
-- current locomotor load
-
-The resulting **rest drive** changes general neural tonic/noise/activity.
-
-It never directly calls a sleep, wake, turn or escape action.
-
-A sufficiently strong sensory event can therefore still propagate through the neural system while the organism is in a lower-activity state.
+Offline time now advances hunger, low-activity metabolism and sleep homeostasis,
+so closing the application no longer freezes every physiological variable while
+wall-clock age continues to advance.
 
 ---
 
@@ -663,7 +702,7 @@ Flybit does not currently claim:
 
 Use the latest stable release:
 
-**[Flybit v0.2.0](https://github.com/sedatyildiznet/flybit/releases/tag/v0.2.0)**
+**[Flybit v0.3.0](https://github.com/sedatyildiznet/flybit/releases/tag/v0.3.0)**
 
 The Windows package is produced by GitHub Actions as:
 
@@ -799,6 +838,12 @@ At a high level:
                         │
                         ▼
 ┌───────────────────────────────────────────────┐
+│       MODELED ETHOLOGY / VNC BRIDGE           │
+│ bouts · sleep · groom · forage · escape       │
+└───────────────────────┬───────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────┐
 │                 BODY MODEL                    │
 │ x/y · heading · gait · altitude · flight      │
 └───────────────────────┬───────────────────────┘
@@ -833,40 +878,35 @@ This constraint is one of the main design goals of the project.
 
 # Roadmap
 
-v0.2.0 establishes the persistent sensory-driven organism architecture.
+v0.3.0 establishes the first lifelike behavioural layer on top of the persistent
+MaleCNS organism.
 
-Future work should prioritize biological fidelity over adding more scripted features.
+### Implemented in v0.3.0
 
-### Body
+- stochastic stop / walk / turn bouts
+- side-preserving escape steering
+- pre-escape threat sensitization
+- explicit sleep and wake-by-startle
+- grooming bouts and matching body animation
+- bilateral odor-guided foraging
+- stationary feeding bouts
+- offline hunger / metabolism / sleep progression
+- one world/physics clock using measured frame `dt`
+- multi-radius retinal samples for more coherent looming detection
 
-- richer six-leg biomechanics
-- contact/proprioceptive feedback
-- more realistic take-off and landing transitions
-- grooming and additional motor primitives
-- better flight stabilization
+### Next fidelity targets
 
-### Sensory systems
+- receptor-grounded olfactory and gustatory injection where validated mappings exist
+- richer six-leg/VNC biomechanics and proprioceptive feedback
+- contact mechanosensation
+- more realistic flight stabilization and landing
+- experimentally supportable mushroom-body plasticity
+- persistent learned food/threat associations
+- behavioural assay distributions matched against published Drosophila data
+- a fuller compound-eye spatial model beyond the current brain-facing 1-D panorama
 
-- receptor-grounded mechanosensation
-- receptor-grounded olfaction
-- receptor-grounded gustation
-- proprioceptive channels
-
-### Learning
-
-- experimentally supportable mushroom-body pathways
-- dopamine-gated associative learning
-- persistent learned associations
-- stronger behavioral assay suite
-
-### Long-duration organism behavior
-
-- improved circadian validation
-- rest/sleep assays
-- age-related changes
-- multi-hour and multi-day behavioral telemetry
-
-The rule remains the same: **new features should enter the sensory-neural-body loop rather than bypass it.**
+The rule remains the same: measured biology, modeled transduction and synthetic
+desktop-world mechanisms must remain clearly separated.
 
 ---
 

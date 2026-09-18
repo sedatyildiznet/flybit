@@ -107,6 +107,7 @@ class FlyKinematics:
         self._backward = 0.0
         self._steer = 0.0
         self._escape = 0.0
+        self._escape_bias = 0.0
         self._escape_prev = 0.0
         self._gait_phase = 0.0
         self._wingbeat_hz = 0.0
@@ -163,12 +164,29 @@ class FlyKinematics:
             dt,
             0.045,
         )
+        self._escape_bias = self._lowpass(
+            self._escape_bias,
+            motor.escape_right - motor.escape_left,
+            dt,
+            0.035,
+        )
 
         # Steering is a yaw-only decoder on the screen plane. It cannot roll or
         # pitch the rendered body, so the fly no longer appears to somersault.
-        target_turn_rate = max(
+        # Side-specific escape output is retained as a fast evasive yaw bias.
+        # This fixes the old behaviour where left/right DNp01 information was
+        # collapsed to max() and the body simply accelerated along its current
+        # heading like a wheeled robot.
+        normal_turn_rate = max(
             -2.8,
             min(2.8, self._steer * 5.0),
+        )
+        target_turn_rate = max(
+            -4.2,
+            min(
+                4.2,
+                normal_turn_rate + self._escape_bias * 4.6,
+            ),
         )
         s.angular_velocity = self._lowpass(
             s.angular_velocity,
@@ -187,6 +205,9 @@ class FlyKinematics:
             self._escape > 0.06
             and self._escape_prev <= 0.06
         ):
+            s.heading = self._wrap_angle(
+                s.heading + self._escape_bias * 0.72
+            )
             s.airborne = True
             s.support_id = None
             s.support_title = "Air"
@@ -202,7 +223,7 @@ class FlyKinematics:
             events.append(
                 MotionEvent(
                     "takeoff",
-                    "DNp01 escape output",
+                    "directional escape/take-off motor program",
                 )
             )
 

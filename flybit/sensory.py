@@ -54,6 +54,7 @@ class DesktopMotionModel:
         self._last_distance: float | None = None
         self._last_angular_radius: float | None = None
         self._last_luminance: np.ndarray | None = None
+        self._last_radial_luminance: np.ndarray | None = None
         self._loom_habituation = 0.0
 
     @staticmethod
@@ -91,6 +92,54 @@ class DesktopMotionModel:
             return float(np.clip(strongest.mean() * 2.8, 0.0, 1.0))
 
         return score(growth[:half]), score(growth[half:])
+
+    @staticmethod
+    def _retinal_loom_radial(
+        previous: np.ndarray | None,
+        current: np.ndarray | None,
+    ) -> tuple[float, float] | None:
+        """Estimate coherent expansion across multiple retinal distance bands.
+
+        The brain-facing panorama stays one-dimensional for compatibility, but
+        looming can use the uncollapsed radial samples. A candidate expansion
+        must therefore be supported by more than one distance band and by a
+        short contiguous angular neighbourhood, reducing false alarms from a
+        single dark pixel or abrupt local UI redraw.
+        """
+        if previous is None or current is None:
+            return None
+        prev = np.asarray(previous, dtype=np.float32)
+        cur = np.asarray(current, dtype=np.float32)
+        if (
+            prev.ndim != 2
+            or cur.ndim != 2
+            or prev.shape != cur.shape
+            or prev.shape[0] < 2
+            or prev.shape[1] < 16
+        ):
+            return None
+
+        growth = np.maximum(prev - cur, 0.0)
+        coherence = np.mean(growth > 0.055, axis=0)
+        angular = np.mean(growth, axis=0) * (
+            0.35 + 0.65 * coherence
+        )
+        kernel = np.ones(5, dtype=np.float32) / 5.0
+        smooth = np.convolve(angular, kernel, mode="same")
+        half = len(smooth) // 2
+
+        def score(values: np.ndarray) -> float:
+            if values.size == 0:
+                return 0.0
+            threshold = float(np.percentile(values, 90.0))
+            coherent = values[values >= threshold]
+            if coherent.size == 0:
+                return 0.0
+            return float(
+                np.clip(coherent.mean() * 4.0, 0.0, 1.0)
+            )
+
+        return score(smooth[:half]), score(smooth[half:])
 
     @staticmethod
     def _optic_flow(
@@ -132,6 +181,7 @@ class DesktopMotionModel:
         cursor_x: float,
         cursor_y: float,
         luminance: np.ndarray,
+        radial_luminance: np.ndarray | None = None,
         timestamp: float | None = None,
     ) -> SensoryDynamics:
         now = time.monotonic() if timestamp is None else float(timestamp)
@@ -210,10 +260,17 @@ class DesktopMotionModel:
         )
 
         lum = np.asarray(luminance, dtype=np.float32).reshape(-1)
-        raw_loom_left, raw_loom_right = self._retinal_loom(
-            self._last_luminance,
-            lum,
+        radial_loom = self._retinal_loom_radial(
+            self._last_radial_luminance,
+            radial_luminance,
         )
+        if radial_loom is None:
+            raw_loom_left, raw_loom_right = self._retinal_loom(
+                self._last_luminance,
+                lum,
+            )
+        else:
+            raw_loom_left, raw_loom_right = radial_loom
         raw_loom = max(raw_loom_left, raw_loom_right)
         if raw_loom > 0.04:
             self._loom_habituation = self._clamp01(
@@ -249,6 +306,14 @@ class DesktopMotionModel:
         self._last_distance = distance
         self._last_angular_radius = angular_radius
         self._last_luminance = lum.copy()
+        self._last_radial_luminance = (
+            None
+            if radial_luminance is None
+            else np.asarray(
+                radial_luminance,
+                dtype=np.float32,
+            ).copy()
+        )
 
         return SensoryDynamics(
             timestamp=now,

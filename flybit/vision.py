@@ -36,6 +36,11 @@ class DesktopRetinaSampler:
             dtype=np.float32,
         )
         self.motion = DesktopMotionModel(cursor_radius=14.0)
+        self._last_radial_luminance = np.full(
+            (len(self.radii), self.bins),
+            0.9,
+            dtype=np.float32,
+        )
 
     @staticmethod
     def _screen_at(point: QPoint):
@@ -61,6 +66,11 @@ class DesktopRetinaSampler:
         origin = QPoint(int(round(x)), int(round(y)))
         screen = self._screen_at(origin)
         if screen is None:
+            self._last_radial_luminance = np.full(
+                (len(self.radii), self.bins),
+                0.9,
+                dtype=np.float32,
+            )
             return np.full(
                 self.bins,
                 0.9,
@@ -105,6 +115,11 @@ class DesktopRetinaSampler:
             self.bins,
             dtype=np.float32,
         )
+        radial_values = np.full(
+            (len(self.radii), self.bins),
+            0.9,
+            dtype=np.float32,
+        )
 
         for i, az in enumerate(self.azimuth):
             angle = heading + float(az) * math.pi
@@ -113,14 +128,16 @@ class DesktopRetinaSampler:
             total = 0.0
             count = 0
 
-            for radius in self.radii:
+            for radius_index, radius in enumerate(self.radii):
                 px = int(round(sample_x + cs * radius))
                 py = int(round(sample_y + sn * radius))
                 if (
                     0 <= px < image.width()
                     and 0 <= py < image.height()
                 ):
-                    total += qGray(image.pixel(px, py)) / 255.0
+                    sample_luminance = qGray(image.pixel(px, py)) / 255.0
+                    radial_values[radius_index, i] = sample_luminance
+                    total += sample_luminance
                     count += 1
 
             values[i] = (
@@ -160,6 +177,10 @@ class DesktopRetinaSampler:
                 values[mask],
                 np.float32(luminance),
             )
+            radial_values[:, mask] = np.minimum(
+                radial_values[:, mask],
+                np.float32(luminance),
+            )
 
         # Windows screen capture normally omits the hardware cursor. Add its
         # retinal silhouette as a sensory image, not as a behaviour command.
@@ -183,6 +204,11 @@ class DesktopRetinaSampler:
                 0.38,
             )
 
+        self._last_radial_luminance = np.clip(
+            radial_values,
+            0.0,
+            1.0,
+        ).astype(np.float32)
         return np.clip(
             values,
             0.0,
@@ -217,6 +243,7 @@ class DesktopRetinaSampler:
             cursor_x=float(cursor.x()),
             cursor_y=float(cursor.y()),
             luminance=luminance,
+            radial_luminance=self._last_radial_luminance,
             timestamp=timestamp,
         )
         return luminance, dynamics

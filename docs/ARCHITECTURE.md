@@ -4,22 +4,38 @@ Flybit is a desktop organism built around the public **Drosophila MaleCNS v1.0 c
 
 ## Non-negotiable control rule
 
-Flybit must not contain application logic that chooses biological behaviour on behalf of the nervous system.
+Flybit must not use **semantic desktop shortcuts** as biological behaviour.
+Application names, cursor identity, OCR labels or an LLM may never map directly
+to movement.
 
 Forbidden patterns include:
 
 - `if mouse_near: escape()`
+- `if food_exists: move_toward(food_xy)`
 - LLM output mapped directly to movement
-- scripted wandering presented as neural behaviour
-- personality sliders that directly select actions
+- application/window names selecting locomotion
+- scripted behaviour presented as if it emerged from measured MaleCNS wiring
 
-The intended closed loop is:
+v0.3.0 adds a clearly labelled **MODELED ethology/VNC bridge** because the
+current simplified whole-CNS neuron model does not include complete VNC,
+musculoskeletal, neuromodulatory and behavioural-selection physiology. This
+bridge may select among modeled motor programmes only from non-semantic sensory
+quantities, internal drives and MaleCNS descending output.
+
+The intended closed loop is now:
 
 ```
-world -> sensory transduction -> MaleCNS neural dynamics -> motor nervous system -> body physics -> world
+world
+  -> sensory transduction
+  -> MaleCNS neural dynamics
+  -> descending output
+  -> modeled ethology / VNC bridge
+  -> body physics
+  -> world
 ```
 
-Code outside the neural/body model may translate physical quantities between domains, but it must not select the action.
+Measured biology, modeled transduction/ethology and synthetic desktop-world
+signals must remain explicitly separated in code and UI.
 
 ## Neural foundation
 
@@ -90,22 +106,24 @@ The screen sampler performs luminance downsampling only. It does not identify wi
 
 The desktop retina targets a 20 ms cadence. To keep this practical, capture is restricted to the local region actually reached by the six retinal radii instead of copying the complete display. Because cursor angular width is computed from physical screen geometry, an approaching cursor occupies progressively more angular bins and therefore produces real temporal looming in the retinal stream.
 
-A separate temporal observer computes cursor distance, velocity, acceleration, closing speed, angular growth, TTC and whole-field optic flow for validation/debugging. These values are not movement commands. A modeled near-field disturbance value is also exposed but remains telemetry-only until a defensible MaleCNS mechanosensory receptor mapping is available.
+A separate temporal observer computes cursor distance, velocity, acceleration, closing speed, angular growth, TTC and whole-field optic flow for validation/debugging. Cursor identity and semantic threat salience remain telemetry-only. The modeled near-field disturbance may modulate the explicitly modeled ethology layer, but it is not injected into MaleCNS as receptor-accurate mechanosensation.
+
+v0.3.0 also preserves luminance separately across the six sampling radii for temporal looming analysis. The brain-facing panorama remains one-dimensional for compatibility, while the looming detector now requires multi-band/angular coherence before producing a strong expansion cue.
 
 ## Roadmap
 
-1. **Neural foundation** — complete.
-2. **Graded early vision** — implemented; real-MaleCNS validation required before release.
-3. **Motor bridge** — identified descending-neuron groups drive the current 2-D desktop body.
-4. **Closed-loop desktop world** — raw screen luminance and planar body physics feed each other continuously; fuller biomechanical coupling remains future work.
-5. **Feeding / mechanosensation** — olfactory, gustatory and mechanosensory transduction from published biology.
-6. **Plasticity** — mushroom-body dopamine-gated learning where experimentally supportable.
-7. **Persistent individual** — persist neural/plastic state across launches.
-
-## Scientific honesty
-
-MaleCNS is a measured wiring diagram. Flybit is still a computational nervous-system model, not a complete biological brain emulation. Receptor-specific effects, many graded cell types, neuromodulation, detailed dendritic integration, muscle/body coupling and plasticity remain incomplete.
-
+1. **Neural foundation** — complete at the current MaleCNS abstraction level.
+2. **Graded early vision** — implemented with real-data validation.
+3. **Motor bridge** — identified descending groups plus side-preserving escape.
+4. **Modeled ethology/VNC layer** — implemented in v0.3.0 for naturalistic bouts,
+   sleep, grooming, foraging, feeding and escape.
+5. **Closed-loop desktop world** — active; world timing now uses measured frame
+   `dt` and one world/physics sampling clock.
+6. **Sensory fidelity** — next: receptor-grounded olfaction, gustation,
+   mechanosensation and proprioception where mappings are defensible.
+7. **Plasticity** — next: mushroom-body dopamine-gated learning where
+   experimentally supportable.
+8. **Biomechanics** — next: richer six-leg/VNC/body coupling and flight control.
 
 ## Desktop body bridge
 
