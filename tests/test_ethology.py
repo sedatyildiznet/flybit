@@ -23,6 +23,14 @@ def odor(*, salience=0.0, mean=0.0, gradient=0.0):
     )
 
 
+def boundary(*, strength=0.0, tangent=0.0, inward=1.57):
+    return SimpleNamespace(
+        strength=strength,
+        tangent_heading=tangent,
+        inward_heading=inward,
+    )
+
+
 class EthologyModelTest(unittest.TestCase):
     def test_left_loom_produces_directional_escape(self):
         model = EthologyModel(seed=1)
@@ -123,6 +131,55 @@ class EthologyModelTest(unittest.TestCase):
 
         self.assertEqual(snap.mode, "escape")
         self.assertGreater(snap.motor.escape, 0.0)
+
+    def test_airborne_looming_enters_landing_preparation(self):
+        model = EthologyModel(seed=9)
+        snap = None
+        for _ in range(20):
+            snap = model.tick(
+                0.020,
+                neural=MotorActivity(),
+                sensory=SimpleNamespace(
+                    retinal_loom_left=0.28,
+                    retinal_loom_right=0.24,
+                    mechanosensory_disturbance=0.0,
+                    optic_flow=0.2,
+                ),
+                airborne=True,
+            )
+        assert snap is not None
+        self.assertEqual(snap.mode, "landing")
+        self.assertGreater(snap.landing_drive, 0.0)
+
+    def test_boundary_cue_can_drive_boundary_following(self):
+        model = EthologyModel(seed=10)
+        model.bout_remaining = 0.0
+        snap = model.tick(
+            0.020,
+            neural=MotorActivity(),
+            boundary=boundary(strength=0.95, tangent=1.57, inward=0.0),
+            heading=0.0,
+            rest_drive=0.0,
+            activity=0.2,
+            curiosity=0.1,
+        )
+        self.assertEqual(snap.mode, "boundary")
+        self.assertGreater(snap.motor.forward, 0.0)
+        self.assertNotEqual(snap.motor.steering, 0.0)
+
+    def test_sleep_deepens_with_time(self):
+        model = EthologyModel(seed=11)
+        model.mode = "sleep"
+        model.bout_remaining = 30.0
+        snap = None
+        for _ in range(450):
+            snap = model.tick(
+                0.020,
+                neural=MotorActivity(),
+                rest_drive=0.95,
+            )
+        assert snap is not None
+        self.assertEqual(snap.sleep_stage, "deep")
 
     def test_neural_motor_output_is_never_erased_outside_sleep(self):
         model = EthologyModel(seed=6)
