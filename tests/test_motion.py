@@ -70,6 +70,28 @@ class MotionBridgeTest(unittest.TestCase):
             )
         )
 
+    def test_asymmetric_escape_changes_heading(self):
+        body = FlyBodyState(
+            x=200.0,
+            y=200.0,
+            heading=0.0,
+        )
+        model = FlyKinematics(body)
+
+        for _ in range(5):
+            model.update(
+                MotorActivity(
+                    escape_right=1.0,
+                    escape_left=0.0,
+                ),
+                [],
+                (0.0, 0.0, 800.0, 600.0),
+                dt=0.020,
+            )
+
+        self.assertTrue(body.airborne)
+        self.assertGreater(body.heading, 0.20)
+
     def test_flight_lands_via_virtual_altitude_not_screen_y(self):
         body = FlyBodyState(
             x=300.0,
