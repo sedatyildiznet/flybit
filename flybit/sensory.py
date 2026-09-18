@@ -55,6 +55,7 @@ class DesktopMotionModel:
         self._last_angular_radius: float | None = None
         self._last_luminance: np.ndarray | None = None
         self._last_radial_luminance: np.ndarray | None = None
+        self._last_compound_luminance: np.ndarray | None = None
         self._loom_habituation = 0.0
 
     @staticmethod
@@ -142,6 +143,50 @@ class DesktopMotionModel:
         return score(smooth[:half]), score(smooth[half:])
 
     @staticmethod
+    def _retinal_loom_compound(
+        previous: np.ndarray | None,
+        current: np.ndarray | None,
+    ) -> tuple[float, float] | None:
+        """Estimate expansion that is coherent across facet rows and radii."""
+        if previous is None or current is None:
+            return None
+        prev = np.asarray(previous, dtype=np.float32)
+        cur = np.asarray(current, dtype=np.float32)
+        if (
+            prev.ndim != 3
+            or cur.ndim != 3
+            or prev.shape != cur.shape
+            or prev.shape[0] < 2
+            or prev.shape[1] < 2
+            or prev.shape[2] < 16
+        ):
+            return None
+
+        growth = np.maximum(prev - cur, 0.0)
+        sample_coherence = np.mean(growth > 0.045, axis=(0, 1))
+        row_growth = np.mean(growth, axis=1)
+        row_coherence = np.mean(row_growth > 0.025, axis=0)
+        angular = np.mean(growth, axis=(0, 1)) * (
+            0.25
+            + 0.45 * sample_coherence
+            + 0.30 * row_coherence
+        )
+        kernel = np.ones(7, dtype=np.float32) / 7.0
+        smooth = np.convolve(angular, kernel, mode="same")
+        half = len(smooth) // 2
+
+        def score(values: np.ndarray) -> float:
+            if values.size == 0:
+                return 0.0
+            threshold = float(np.percentile(values, 88.0))
+            coherent = values[values >= threshold]
+            if coherent.size == 0:
+                return 0.0
+            return float(np.clip(coherent.mean() * 4.4, 0.0, 1.0))
+
+        return score(smooth[:half]), score(smooth[half:])
+
+    @staticmethod
     def _optic_flow(
         previous: np.ndarray | None,
         current: np.ndarray,
@@ -182,6 +227,7 @@ class DesktopMotionModel:
         cursor_y: float,
         luminance: np.ndarray,
         radial_luminance: np.ndarray | None = None,
+        compound_luminance: np.ndarray | None = None,
         timestamp: float | None = None,
     ) -> SensoryDynamics:
         now = time.monotonic() if timestamp is None else float(timestamp)
@@ -260,17 +306,23 @@ class DesktopMotionModel:
         )
 
         lum = np.asarray(luminance, dtype=np.float32).reshape(-1)
+        compound_loom = self._retinal_loom_compound(
+            self._last_compound_luminance,
+            compound_luminance,
+        )
         radial_loom = self._retinal_loom_radial(
             self._last_radial_luminance,
             radial_luminance,
         )
-        if radial_loom is None:
+        if compound_loom is not None:
+            raw_loom_left, raw_loom_right = compound_loom
+        elif radial_loom is not None:
+            raw_loom_left, raw_loom_right = radial_loom
+        else:
             raw_loom_left, raw_loom_right = self._retinal_loom(
                 self._last_luminance,
                 lum,
             )
-        else:
-            raw_loom_left, raw_loom_right = radial_loom
         raw_loom = max(raw_loom_left, raw_loom_right)
         if raw_loom > 0.04:
             self._loom_habituation = self._clamp01(
@@ -311,6 +363,14 @@ class DesktopMotionModel:
             if radial_luminance is None
             else np.asarray(
                 radial_luminance,
+                dtype=np.float32,
+            ).copy()
+        )
+        self._last_compound_luminance = (
+            None
+            if compound_luminance is None
+            else np.asarray(
+                compound_luminance,
                 dtype=np.float32,
             ).copy()
         )
