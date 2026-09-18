@@ -17,6 +17,7 @@ on:
       - "flybit/state.py"
       - "scripts/validate_graded_vision.py"
       - "scripts/validate_motor_groups.py"
+      - "scripts/validate_ethogram.py"
       - "tests/**"
       - ".github/workflows/neural-validation.yml"
   workflow_dispatch:
@@ -58,3 +59,6 @@ jobs:
 
       - name: Validate real MaleCNS motor decoder
         run: python scripts/validate_motor_groups.py
+
+      - name: Validate Flybit ethogram calibration
+        run: python scripts/validate_ethogram.py
