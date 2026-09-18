@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 from .arousal import ThreatArousalModel
 from .care import CareModel
 from .circadian import CircadianModel
+from .ethology import EthologyModel, EthologySnapshot
 from .icon import flybit_icon
 from .life import LifeModel, LifeSnapshot
 from .perception import DesktopSemanticScanner, PerceivedObject
@@ -52,7 +53,13 @@ from .motion import (
 )
 from .neural import FlybitNeuralCore, NeuralSnapshot
 from .olfaction import FoodOdorModel
-from .state import load_state, normalize_display_name, save_state
+from .state import (
+    elapsed_since_last_simulation,
+    load_state,
+    mark_simulated_now,
+    normalize_display_name,
+    save_state,
+)
 from .vision import DesktopRetinaSampler
 from .world import WindowSurfaceScanner
 
@@ -224,6 +231,7 @@ class FlyOverlay(QWidget):
         self.drive = 0.0
         self.gait_phase = 0.0
         self.altitude = 0.0
+        self.behavior = "idle"
         self._wing_phase = 0.0
 
         self.setFixedSize(48, 40)
@@ -248,12 +256,14 @@ class FlyOverlay(QWidget):
         drive: float,
         gait_phase: float = 0.0,
         altitude: float = 0.0,
+        behavior: str = "idle",
     ) -> None:
         self.heading = heading
         self.airborne = airborne
         self.drive = max(0.0, min(1.0, drive))
         self.gait_phase = float(gait_phase) % 1.0
         self.altitude = max(0.0, float(altitude))
+        self.behavior = str(behavior or "idle")
         self._wing_phase = (
             self._wing_phase
             + (0.55 if airborne else 0.08)
@@ -305,19 +315,25 @@ class FlyOverlay(QWidget):
             if not self.airborne
             else 0.0
         )
-        for root_x, root_y, end_x, end_y, phase_sign in (
+        groom_phase = math.sin(self._wing_phase * 2.7) * 4.2
+        for index, (root_x, root_y, end_x, end_y, phase_sign) in enumerate((
             (-5, -4, -15, -12, 1.0),
             (1, -5, -3, -16, -1.0),
             (7, -4, 17, -11, 1.0),
             (-5, 4, -15, 12, -1.0),
             (1, 5, -3, 16, 1.0),
             (7, 4, 17, 11, -1.0),
-        ):
+        )):
+            groom_x = 0.0
+            groom_y = 0.0
+            if self.behavior == "groom" and index in (2, 5):
+                groom_x = -7.0 + abs(groom_phase)
+                groom_y = -groom_phase if index == 2 else groom_phase
             painter.drawLine(
                 root_x,
                 root_y,
-                int(round(end_x + phase_sign * stride)),
-                end_y,
+                int(round(end_x + phase_sign * stride + groom_x)),
+                int(round(end_y + groom_y)),
             )
 
         # Wings flutter visually while airborne. They do not move the body.
@@ -957,6 +973,10 @@ class ControlPanel(QWidget):
         self.arousal_status = QLabel("Threat arousal · —")
         self.arousal_status.setObjectName("muted")
         life_layout.addWidget(self.arousal_status)
+        self.behavior_status = QLabel("Ethology · —")
+        self.behavior_status.setWordWrap(True)
+        self.behavior_status.setObjectName("muted")
+        life_layout.addWidget(self.behavior_status)
         self.biomechanics = QLabel(
             "Speed — · acceleration — · gait — · wingbeat —"
         )
@@ -1250,6 +1270,7 @@ class ControlPanel(QWidget):
         biomechanics,
         circadian=None,
         arousal=None,
+        ethology: EthologySnapshot | None = None,
     ) -> None:
         if life.age_days >= 1.0:
             age_text = f"{life.age_days:.2f} days"
@@ -1291,6 +1312,14 @@ class ControlPanel(QWidget):
             self.arousal_status.setText(
                 f"Threat arousal · {arousal.threat_arousal:.2f}"
             )
+        if ethology is not None:
+            self.behavior_status.setText(
+                f"Ethology · {ethology.mode.upper()} · "
+                f"alert {ethology.alertness:.2f} · "
+                f"threat {ethology.threat_drive:.2f} · "
+                f"food {ethology.food_drive:.2f} · "
+                f"groom need {ethology.grooming_need:.2f}"
+            )
 
     def append_log(self, message: str) -> None:
         stamp = time.strftime("%H:%M:%S")
@@ -1321,11 +1350,21 @@ class FlybitWindow(QObject):
         super().__init__()
         self.app = QApplication.instance()
         self.state = load_state()
+        offline_elapsed = elapsed_since_last_simulation(self.state)
         self.care = CareModel(self.state)
         self.life = LifeModel(self.state)
         self.circadian = CircadianModel(self.state)
         self.arousal = ThreatArousalModel()
+        self.ethology = EthologyModel(
+            seed=64,
+            grooming_need=float(getattr(self.state, "grooming_need", 0.18)),
+            threat_memory=float(getattr(self.state, "threat_memory", 0.0)),
+        )
         self.olfaction = FoodOdorModel()
+        if offline_elapsed > 1.0:
+            self.care.tick(offline_elapsed)
+            self.life.elapse(offline_elapsed, hunger=self.state.hunger)
+            self.circadian.elapse(offline_elapsed)
         self.semantic_scanner = DesktopSemanticScanner()
         self.surface_scanner = WindowSurfaceScanner()
         self.nearby_objects: tuple[PerceivedObject, ...] = ()
@@ -1381,10 +1420,14 @@ class FlybitWindow(QObject):
                 heading=float(self.state.heading),
             )
         )
+        self.latest_neural_motor = MotorActivity()
         self.latest_motor = MotorActivity()
         self.latest_snapshot: NeuralSnapshot | None = None
         self.latest_sensory = None
+        self.latest_odor = None
+        self.latest_ethology: EthologySnapshot | None = None
         self._last_log: dict[str, float] = {}
+        self._last_tick_time = time.monotonic()
 
         self._brain_thread = QThread(self)
         self._worker = BrainWorker()
@@ -1417,11 +1460,9 @@ class FlybitWindow(QObject):
         self._physics_timer.timeout.connect(self._tick)
         self._physics_timer.start()
 
-        self._vision_timer = QTimer(self)
-        self._vision_timer.setTimerType(Qt.TimerType.PreciseTimer)
-        self._vision_timer.setInterval(20)
-        self._vision_timer.timeout.connect(self._capture_scene)
-        self._vision_timer.start()
+        # Vision is captured from the same world tick as body physics. The
+        # neural worker remains asynchronous, but all desktop observations now
+        # carry the current body state instead of running on a competing timer.
         self._capture_scene()
 
         self._care_timer = QTimer(self)
@@ -1489,11 +1530,18 @@ class FlybitWindow(QObject):
 
     @Slot()
     def _tick(self) -> None:
-        self.care.tick(0.020)
+        now = time.monotonic()
+        dt = max(0.005, min(0.100, now - self._last_tick_time))
+        self._last_tick_time = now
+
+        # One world clock: sample the scene immediately before physiology,
+        # ethology and body integration.
+        self._capture_scene()
+        self.care.tick(dt)
         life = self.life.snapshot()
         motor_load = self.kinematics.biomechanics().locomotor_load
         self.life.tick(
-            0.020,
+            dt,
             motor_load=motor_load,
             hunger=self.state.hunger,
         )
@@ -1504,16 +1552,45 @@ class FlybitWindow(QObject):
             else 0.5
         )
         self.circadian.tick(
-            0.020,
+            dt,
             motor_load=motor_load,
             ambient_luminance=ambient,
         )
         circadian = self.circadian.snapshot()
+
+        sensory_threat = 0.0
+        if self.latest_sensory is not None:
+            sensory_threat = max(
+                self.latest_sensory.retinal_loom_left,
+                self.latest_sensory.retinal_loom_right,
+                0.45 * self.latest_sensory.mechanosensory_disturbance,
+            )
         self.arousal.tick(
-            0.020,
-            escape_drive=self.latest_motor.escape,
+            dt,
+            escape_drive=self.latest_neural_motor.escape,
+            sensory_threat=sensory_threat,
         )
         arousal = self.arousal.snapshot()
+
+        odor = self._sample_odor()
+        ethology = self.ethology.tick(
+            dt,
+            neural=self.latest_neural_motor if life.alive else MotorActivity(),
+            sensory=self.latest_sensory,
+            odor=odor,
+            hunger_drive=self.care.homeostatic_drive,
+            rest_drive=circadian.rest_drive,
+            activity=life.activity,
+            boldness=life.boldness,
+            curiosity=life.curiosity,
+            threat_arousal=arousal.threat_arousal,
+            airborne=self.kinematics.state.airborne,
+        )
+        self.latest_ethology = ethology
+        self.latest_motor = ethology.motor if life.alive else MotorActivity()
+        self.state.grooming_need = ethology.grooming_need
+        self.state.threat_memory = ethology.alertness
+
         self.homeostasis_changed.emit(
             self.care.homeostatic_drive,
             life.vitality,
@@ -1528,10 +1605,10 @@ class FlybitWindow(QObject):
         if not life.alive:
             physiology_gain = 0.0
         events = self.kinematics.update(
-            self.latest_motor if life.alive else MotorActivity(),
+            self.latest_motor,
             self.surfaces,
             bounds,
-            dt=0.020,
+            dt=dt,
             physiology_gain=physiology_gain,
         )
 
@@ -1542,7 +1619,7 @@ class FlybitWindow(QObject):
                 )
             elif event.kind == "takeoff":
                 self.panel.append_log(
-                    "DNp01 → altitude takeoff"
+                    f"{ethology.mode} → altitude takeoff"
                 )
             elif event.kind == "surface_contact":
                 self.panel.append_log(
@@ -1561,8 +1638,18 @@ class FlybitWindow(QObject):
             ),
             gait_phase=bio.gait_phase,
             altitude=bio.altitude,
+            behavior=ethology.mode,
         )
         self._position_overlay()
+
+        if self.panel.isVisible():
+            self.panel.update_life(
+                life,
+                bio,
+                circadian,
+                arousal,
+                ethology,
+            )
 
         if self.care.contact(body.x, body.y):
             self.life.feed()
@@ -1622,8 +1709,7 @@ class FlybitWindow(QObject):
         self.panel.append_log(f"organism renamed · {clean}")
         save_state(self.state)
 
-    @Slot()
-    def _refresh_care(self) -> None:
+    def _sample_odor(self):
         body = self.kinematics.state
         food = self.care.food
         odor_food = (
@@ -1631,13 +1717,19 @@ class FlybitWindow(QObject):
             if food is not None
             else None
         )
-        odor = self.olfaction.sample(
+        self.latest_odor = self.olfaction.sample(
             x=body.x,
             y=body.y,
             heading=body.heading,
             food=odor_food,
             hunger_drive=self.care.homeostatic_drive,
         )
+        return self.latest_odor
+
+    @Slot()
+    def _refresh_care(self) -> None:
+        food = self.care.food
+        odor = self._sample_odor()
         self.panel.update_care(
             hunger=self.state.hunger,
             feedings=self.state.feedings,
@@ -1650,6 +1742,7 @@ class FlybitWindow(QObject):
             self.kinematics.biomechanics(),
             self.circadian.snapshot(),
             self.arousal.snapshot(),
+            self.latest_ethology,
         )
 
     @Slot()
@@ -1691,7 +1784,7 @@ class FlybitWindow(QObject):
     @Slot(object)
     def _on_snapshot(self, snap: NeuralSnapshot) -> None:
         self.latest_snapshot = snap
-        self.latest_motor = snap.motor
+        self.latest_neural_motor = snap.motor
 
         if self.panel.isVisible():
             self.panel.update_snapshot(
@@ -1795,6 +1888,9 @@ class FlybitWindow(QObject):
         self.state.x = float(body.x)
         self.state.y = float(body.y)
         self.state.heading = float(body.heading)
+        self.state.grooming_need = float(self.ethology.grooming_need)
+        self.state.threat_memory = float(self.ethology.alertness)
+        mark_simulated_now(self.state)
         geom = self.panel.geometry()
         self.state.panel_x = int(geom.x())
         self.state.panel_y = int(geom.y())
@@ -1806,7 +1902,6 @@ class FlybitWindow(QObject):
     def shutdown(self) -> None:
         self._save_position()
         self._physics_timer.stop()
-        self._vision_timer.stop()
         self._care_timer.stop()
         self._perception_timer.stop()
         self._save_timer.stop()
