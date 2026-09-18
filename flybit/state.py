@@ -91,6 +91,14 @@ def save_state(state: FlybitState) -> None:
         0.0,
         min(1.0, float(getattr(state, "sleep_pressure", 0.35))),
     )
+    state.grooming_need = max(
+        0.0,
+        min(1.0, float(getattr(state, "grooming_need", 0.18))),
+    )
+    state.threat_memory = max(
+        0.0,
+        min(1.0, float(getattr(state, "threat_memory", 0.0))),
+    )
     state.display_name = normalize_display_name(state.display_name)
     state.schema = STATE_SCHEMA
     _path().write_text(
