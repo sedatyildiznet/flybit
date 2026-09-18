@@ -370,7 +370,9 @@ class EthologyModel:
             self._flight_elapsed += dt
             self._saccade_cooldown -= dt
 
-            if self.mode not in {"flight", "landing", "escape"}:
+            if self.mode == "escape" and self.bout_remaining <= 0.0:
+                self._set_mode("flight", self.rng.uniform(0.45, 1.8))
+            elif self.mode not in {"flight", "landing", "escape"}:
                 self._set_mode("flight", self.rng.uniform(0.45, 1.8))
 
             # In flight, coherent expansion can prepare landing instead of
