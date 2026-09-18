@@ -16,11 +16,14 @@ Forbidden patterns include:
 - application/window names selecting locomotion
 - scripted behaviour presented as if it emerged from measured MaleCNS wiring
 
-v0.3.0 adds a clearly labelled **MODELED ethology/VNC bridge** because the
+Flybit includes a clearly labelled **MODELED ethology/VNC bridge** because the
 current simplified whole-CNS neuron model does not include complete VNC,
-musculoskeletal, neuromodulatory and behavioural-selection physiology. This
-bridge may select among modeled motor programmes only from non-semantic sensory
-quantities, internal drives and MaleCNS descending output.
+musculoskeletal, neuromodulatory and behavioural-selection physiology. v0.4.0
+extends that bridge with explicit six-leg gait, take-off preload, flight
+saccades, landing preparation, sleep stages, grooming targets, boundary
+following and stable individual kinematic fingerprints. These layers may select
+among modeled motor programmes only from non-semantic sensory quantities,
+internal drives, local geometry and MaleCNS descending output.
 
 The intended closed loop is now:
 
@@ -108,44 +111,66 @@ The desktop retina targets a 20 ms cadence. To keep this practical, capture is r
 
 A separate temporal observer computes cursor distance, velocity, acceleration, closing speed, angular growth, TTC and whole-field optic flow for validation/debugging. Cursor identity and semantic threat salience remain telemetry-only. The modeled near-field disturbance may modulate the explicitly modeled ethology layer, but it is not injected into MaleCNS as receptor-accurate mechanosensation.
 
-v0.3.0 also preserves luminance separately across the six sampling radii for temporal looming analysis. The brain-facing panorama remains one-dimensional for compatibility, while the looming detector now requires multi-band/angular coherence before producing a strong expansion cue.
+v0.4.0 preserves a compact compound-eye field across multiple facet rows and
+six sampling radii for temporal looming analysis. The brain-facing panorama
+remains one-dimensional for MaleCNS compatibility, while the looming detector
+requires angular, radial and cross-row coherence before producing a strong
+expansion cue.
 
 ## Roadmap
 
 1. **Neural foundation** — complete at the current MaleCNS abstraction level.
 2. **Graded early vision** — implemented with real-data validation.
 3. **Motor bridge** — identified descending groups plus side-preserving escape.
-4. **Modeled ethology/VNC layer** — implemented in v0.3.0 for naturalistic bouts,
-   sleep, grooming, foraging, feeding and escape.
-5. **Closed-loop desktop world** — active; world timing now uses measured frame
-   `dt` and one world/physics sampling clock.
-6. **Sensory fidelity** — next: receptor-grounded olfaction, gustation,
-   mechanosensation and proprioception where mappings are defensible.
-7. **Plasticity** — next: mushroom-body dopamine-gated learning where
-   experimentally supportable.
-8. **Biomechanics** — next: richer six-leg/VNC/body coupling and flight control.
+4. **Modeled ethology/VNC layer** — soft competing motor programs, sleep stages,
+   grooming repertoire, foraging, feeding, boundary following and flight-state
+   behaviour are active.
+5. **Physical fly layer** — v0.4.0 adds explicit six-leg stance/swing gait,
+   take-off preload, landing leg extension, flight saccades and gait/body
+   coupling.
+6. **Compound-eye fidelity** — multi-row local retinal field is active while the
+   MaleCNS-facing panorama remains compatible with the existing photoreceptor
+   mapping.
+7. **Behaviour calibration** — runtime ethogram recording and deterministic CI
+   calibration cover stop/walk/turn/boundary categories plus startle and landing.
+8. **Next biological fidelity targets** — receptor-grounded olfaction,
+   gustation, mechanosensation, proprioception and experimentally supportable
+   mushroom-body plasticity.
+
 
 ## Desktop body bridge
 
-The current Windows organism uses a deliberately small 2.5-D kinematic decoder. It does not inspect the cursor or window state to select behaviour.
+The Windows organism is a compact 2.5-D physical model: screen x/y form the
+desktop locomotion plane and flight uses an independent virtual altitude axis.
 
-Measured/identified descending-neuron groups provide the motor signal:
+Measured/identified descending-neuron groups still provide the neural motor
+signal:
 
 - `DNg100` -> primary forward locomotor drive
-- `DNa01` / `DNa02` -> differential steering plus bilateral locomotor contribution
-- `DNp01` -> escape / take-off impulse; a single detected spike is preserved
-- `DNg02_*` MaleCNS subtypes -> flight-thrust / wing-power drive
+- `DNa01` / `DNa02` -> steering and locomotor contribution
+- `DNp01` -> escape / take-off impulse
+- `DNg02_*` -> flight-thrust / wing-power drive
 - `MDN` -> backward locomotor drive
 
-Screen x/y form one flat locomotion plane. Flight now has a separate virtual altitude and vertical-velocity axis. DNp01 supplies a take-off impulse and DNg02 contributes sustained lift; gravity acts only on this virtual altitude, never on monitor Y. Landing occurs when altitude returns to the desktop plane. This preserves the no-falling-across-the-monitor rule while giving airborne state physical duration.
+v0.4.0 inserts explicit modeled body mechanics after those signals:
 
-DNa02 is decoded as yaw-only steering, so the rendered body cannot roll or pitch into somersaults. Grounded rendering derives an alternating tripod gait from locomotor phase; the gait is presentation/body coupling and does not choose direction.
+- six independently posed legs
+- alternating modified-tripod stance/swing coordination
+- speed-dependent stride frequency and stance fraction
+- ground support coupled back into planar motion
+- a short leg preload before escape take-off
+- virtual-altitude lift/gravity flight
+- brief yaw saccades while airborne
+- landing drive that reduces lift, slows translation and extends all six legs
+- substrate identity and geometric boundary cues from visible windows/taskbar
 
-Most descending motor groups are converted to short-window firing-rate estimates before force mapping. This prevents isolated stochastic spikes from becoming full movement commands while preserving sustained neural activity. DNp01 is the exception: Giant Fiber take-off physiology is event-like, so one DNp01 spike is preserved as an immediate escape signal.
+The renderer consumes the same leg poses used by the body model, so walking,
+landing and grooming are no longer unrelated decorative animations.
 
-Cursor approach and all other visible desktop content enter through the retinal luminance panorama. There is no `mouse_near -> escape` rule.
+The mapping from descending-neuron firing to body forces remains a model-defined
+decoder, not a complete musculoskeletal Drosophila simulation. That distinction
+is surfaced in the UI and documentation.
 
-The mapping from descending-neuron firing to 2-D forces is still a model-defined motor decoder, not a complete fly musculoskeletal model. That distinction is surfaced in the UI and documentation.
 
 ## Desktop UI
 
