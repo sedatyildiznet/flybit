@@ -98,6 +98,32 @@ class EthologyModelTest(unittest.TestCase):
         self.assertLess(snap.grooming_need, before)
         self.assertAlmostEqual(snap.motor.forward, 0.0)
 
+    def test_food_contact_enters_stationary_feeding_bout(self):
+        model = EthologyModel(seed=7)
+        model.begin_feeding(1.0)
+        snap = model.tick(
+            0.020,
+            neural=MotorActivity(
+                forward_left=0.08,
+                forward_right=0.08,
+            ),
+        )
+
+        self.assertEqual(snap.mode, "feed")
+        self.assertAlmostEqual(snap.motor.forward, 0.0)
+
+    def test_threat_interrupts_feeding_bout(self):
+        model = EthologyModel(seed=8)
+        model.begin_feeding(1.0)
+        snap = model.tick(
+            0.020,
+            neural=MotorActivity(),
+            sensory=sensory(left=0.95),
+        )
+
+        self.assertEqual(snap.mode, "escape")
+        self.assertGreater(snap.motor.escape, 0.0)
+
     def test_neural_motor_output_is_never_erased_outside_sleep(self):
         model = EthologyModel(seed=6)
         neural = MotorActivity(
