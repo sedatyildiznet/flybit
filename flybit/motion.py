@@ -177,11 +177,15 @@ class FlyKinematics:
         # This fixes the old behaviour where left/right DNp01 information was
         # collapsed to max() and the body simply accelerated along its current
         # heading like a wheeled robot.
+        normal_turn_rate = max(
+            -2.8,
+            min(2.8, self._steer * 5.0),
+        )
         target_turn_rate = max(
             -4.2,
             min(
                 4.2,
-                self._steer * 5.0 + self._escape_bias * 4.6,
+                normal_turn_rate + self._escape_bias * 4.6,
             ),
         )
         s.angular_velocity = self._lowpass(
