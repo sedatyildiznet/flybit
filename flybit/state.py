@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 
-STATE_SCHEMA = 5
+STATE_SCHEMA = 6
 
 
 @dataclass
@@ -27,6 +27,9 @@ class FlybitState:
     boldness_trait: float | None = None
     curiosity_trait: float | None = None
     sleep_pressure: float = 0.35
+    last_simulated_at: str | None = None
+    grooming_need: float = 0.18
+    threat_memory: float = 0.0
     panel_x: int | None = None
     panel_y: int | None = None
     panel_w: int | None = None
@@ -35,9 +38,11 @@ class FlybitState:
 
     @classmethod
     def new(cls) -> "FlybitState":
+        now = datetime.now(timezone.utc).isoformat()
         return cls(
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=now,
             launches=0,
+            last_simulated_at=now,
         )
 
 
@@ -49,6 +54,29 @@ def state_dir() -> Path:
 
 def _path() -> Path:
     return state_dir() / "state.json"
+
+
+def elapsed_since_last_simulation(
+    state: FlybitState,
+    *,
+    now: datetime | None = None,
+) -> float:
+    """Wall-clock seconds since the organism was last persisted."""
+    raw = getattr(state, "last_simulated_at", None)
+    if not raw:
+        return 0.0
+    try:
+        then = datetime.fromisoformat(raw)
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return 0.0
+    current = now or datetime.now(timezone.utc)
+    return max(0.0, (current - then).total_seconds())
+
+
+def mark_simulated_now(state: FlybitState) -> None:
+    state.last_simulated_at = datetime.now(timezone.utc).isoformat()
 
 
 def normalize_display_name(value: str | None) -> str:
@@ -95,6 +123,9 @@ def load_state() -> FlybitState:
                 "boldness_trait",
                 "curiosity_trait",
                 "sleep_pressure",
+                "last_simulated_at",
+                "grooming_need",
+                "threat_memory",
                 "panel_x",
                 "panel_y",
                 "panel_w",
