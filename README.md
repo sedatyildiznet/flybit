@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/sedatyildiznet/flybit/releases/tag/v0.3.0"><img alt="Release" src="https://img.shields.io/badge/release-v0.3.0-2ea44f"></a>
+  <a href="https://github.com/sedatyildiznet/flybit/releases/tag/v0.4.0"><img alt="Release" src="https://img.shields.io/badge/release-v0.4.0-2ea44f"></a>
   <img alt="Status" src="https://img.shields.io/badge/status-stable-2ea44f">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows-0078D4">
   <img alt="Python" src="https://img.shields.io/badge/python-3.10%2B-3776AB">
@@ -55,35 +55,41 @@ Mouse approach, light, movement, hunger, fatigue and other state changes must in
 
 ---
 
-## v0.3.0 Stable
+## v0.4.0 Physical Fly
 
-**v0.3.0 is the first stable Flybit release.**
+**v0.4.0 is the physical-behaviour update.**
 
-This release combines the neural desktop foundation with the persistent-organism layer introduced during the alpha series.
+The MaleCNS foundation remains intact, but the desktop organism now has a much
+richer modeled VNC/body layer designed to remove the "moving sprite" feel.
 
 Major additions include:
 
-- 50 Hz target desktop retinal sampling
-- raw-luminance temporal looming
-- LPLC2 visual-motion transduction
-- cursor velocity, acceleration, closing-speed and TTC telemetry
-- optic-flow observation
-- short-term visual habituation
-- escape-driven sensitization
-- persistent neural membrane/adaptation state
-- 2.5-D flight with an independent altitude axis
-- grounded tripod-gait rendering
-- native Win32 window substrate/contact awareness
-- hunger, energy, ageing and individual phenotype
-- modeled circadian wake/rest physiology
-- bilateral synthetic food-odor telemetry
-- persistent organism naming from the control panel
-- explicit **Measured / Modeled / Synthetic** provenance in the UI
-- real-MaleCNS validation in CI
+- explicit six-leg modified-tripod gait with stance/swing contacts
+- gait support coupled back into grounded body motion
+- escape take-off preload before jump/wing-powered flight
+- context-dependent flight saccades
+- looming-driven landing preparation with all six legs extended
+- 2.5-D window/taskbar/screen boundary geometry and boundary-following
+- multi-row compound-eye sampling on top of the MaleCNS-compatible panorama
+- coherent looming across facet rows and distance bands
+- grooming targets for eyes, antennae, proboscis, abdomen, wings and thorax
+- drowsy / light / deep sleep stages with increasing arousal threshold
+- idle micro-behaviours: antenna sweep, head movement, leg adjustment,
+  wing flick and occasional proboscis extension
+- soft competition between sleep, forage, grooming, boundary, walk, turn and
+  idle drives instead of one rigid priority chain
+- a deterministic individual locomotor/body fingerprint for every organism
+- runtime ethogram recording and CI ethogram calibration
+- a smaller, more anatomical fly renderer with red compound eyes, banded
+  abdomen, translucent wings, jointed legs and visible proboscis
+
+Flybit is still a computational organism, not a literal living fly or a
+complete biological emulation. The connectome is measured data; the ethology,
+VNC, body and desktop physics layers remain explicitly modeled.
 
 Latest stable release:
 
-**[Download Flybit v0.3.0](https://github.com/sedatyildiznet/flybit/releases/tag/v0.3.0)**
+**[Download Flybit v0.4.0](https://github.com/sedatyildiznet/flybit/releases/tag/v0.4.0)**
 
 ---
 
@@ -550,7 +556,7 @@ Feeding count and last-feed time persist across launches.
 
 ## Modeled food odor
 
-v0.3.0 also includes a synthetic bilateral odor field around the sugar source.
+Flybit includes a synthetic bilateral odor field around the sugar source.
 
 Two virtual antenna positions sample:
 
@@ -564,7 +570,7 @@ This is deliberately labeled **MODELED / SYNTHETIC**.
 
 The signal is **not injected into MaleCNS olfactory neurons**, because the bundled runtime metadata does not currently provide the receptor-level mapping required to make that claim responsibly.
 
-In v0.3.0 the bilateral odor field instead feeds the explicitly modeled
+In v0.4.0 the bilateral odor field feeds the explicitly modeled
 ethology/VNC bridge. A hungry organism can therefore perform gradient-based
 foraging without pretending that the synthetic odor field is receptor-accurate
 MaleCNS physiology. Physical body contact is still required before feeding.
@@ -579,7 +585,7 @@ mechanosensation.
 Flybit maintains a modeled wake/rest physiology using local time, ambient
 retinal luminance, homeostatic sleep pressure and recent locomotor load.
 
-v0.3.0 converts that physiology into explicit **quiescent sleep bouts** rather
+v0.4.0 extends that physiology into **drowsy / light / deep sleep bouts** rather
 than only reducing tonic/noise values. Weak stochastic motor leakage is gated
 during sleep, while sufficiently strong retinal looming can wake the organism
 straight into an escape response.
@@ -702,7 +708,7 @@ Flybit does not currently claim:
 
 Use the latest stable release:
 
-**[Flybit v0.3.0](https://github.com/sedatyildiznet/flybit/releases/tag/v0.3.0)**
+**[Flybit v0.3.0](https://github.com/sedatyildiznet/flybit/releases/tag/v0.4.0)**
 
 The Windows package is produced by GitHub Actions as:
 

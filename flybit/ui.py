@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from .arousal import ThreatArousalModel
+from .benchmark import EthogramRecorder
 from .care import CareModel
 from .circadian import CircadianModel
 from .ethology import EthologyModel, EthologySnapshot
@@ -53,6 +54,7 @@ from .motion import (
 )
 from .neural import FlybitNeuralCore, NeuralSnapshot
 from .olfaction import FoodOdorModel
+from .phenotype import phenotype_from_identity, seed_from_identity
 from .state import (
     elapsed_since_last_simulation,
     load_state,
@@ -61,7 +63,7 @@ from .state import (
     save_state,
 )
 from .vision import DesktopRetinaSampler
-from .world import WindowSurfaceScanner
+from .world import WindowSurfaceScanner, boundary_cue
 
 
 class BrainWorker(QObject):
@@ -215,11 +217,7 @@ class BrainWorker(QObject):
 
 
 class FlyOverlay(QWidget):
-    """Tiny always-on-top organism body.
-
-    Drawing/wing animation is presentation only. Position and orientation come
-    from the neural motor bridge.
-    """
+    """Small anatomically styled fly driven by live biomechanics."""
 
     clicked = Signal()
     context_requested = Signal(object)
@@ -232,9 +230,19 @@ class FlyOverlay(QWidget):
         self.gait_phase = 0.0
         self.altitude = 0.0
         self.behavior = "idle"
+        self.legs = ()
+        self.body_bob = 0.0
+        self.head_yaw = 0.0
+        self.proboscis_extension = 0.0
+        self.groom_target = ""
+        self.micro_action = ""
+        self.leg_extension = 0.0
+        self.body_scale = 1.0
         self._wing_phase = 0.0
 
-        self.setFixedSize(48, 40)
+        # Intentionally small: visible enough to read as a fly, but not large
+        # enough to obscure text or become irritating during normal desktop use.
+        self.setFixedSize(36, 30)
         self.setWindowFlags(
             Qt.WindowType.Tool
             | Qt.WindowType.FramelessWindowHint
@@ -257,6 +265,14 @@ class FlyOverlay(QWidget):
         gait_phase: float = 0.0,
         altitude: float = 0.0,
         behavior: str = "idle",
+        legs=(),
+        body_bob: float = 0.0,
+        head_yaw: float = 0.0,
+        proboscis_extension: float = 0.0,
+        groom_target: str = "",
+        micro_action: str = "",
+        leg_extension: float = 0.0,
+        body_scale: float = 1.0,
     ) -> None:
         self.heading = heading
         self.airborne = airborne
@@ -264,148 +280,169 @@ class FlyOverlay(QWidget):
         self.gait_phase = float(gait_phase) % 1.0
         self.altitude = max(0.0, float(altitude))
         self.behavior = str(behavior or "idle")
+        self.legs = tuple(legs or ())
+        self.body_bob = float(body_bob)
+        self.head_yaw = max(-0.4, min(0.4, float(head_yaw)))
+        self.proboscis_extension = max(
+            0.0,
+            min(1.0, float(proboscis_extension)),
+        )
+        self.groom_target = str(groom_target or "")
+        self.micro_action = str(micro_action or "")
+        self.leg_extension = max(0.0, min(1.0, float(leg_extension)))
+        self.body_scale = max(0.90, min(1.08, float(body_scale)))
+
+        wing_rate = 0.72 if airborne else 0.10
+        if self.micro_action == "wing_flick":
+            wing_rate += 0.38
         self._wing_phase = (
             self._wing_phase
-            + (0.55 if airborne else 0.08)
-            + self.drive * 0.35
+            + wing_rate
+            + self.drive * 0.30
         ) % (2.0 * math.pi)
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
-        painter.setRenderHint(
-            QPainter.RenderHint.Antialiasing
-        )
-        painter.translate(
-            self.width() / 2,
-            self.height() / 2,
-        )
-        painter.rotate(
-            math.degrees(self.heading)
-        )
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.translate(self.width() / 2, self.height() / 2)
+        painter.rotate(math.degrees(self.heading))
+        painter.translate(0.0, self.body_bob * 0.40)
+        painter.scale(self.body_scale, self.body_scale)
 
-        # Shadow fades with virtual altitude while remaining on the same screen
-        # plane. Altitude is depth, never monitor-Y gravity.
         shadow_alpha = max(
-            18,
-            min(65, int(65 - self.altitude * 0.40)),
+            10,
+            min(48, int(48 - self.altitude * 0.32)),
         )
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(
-            QBrush(QColor(0, 0, 0, shadow_alpha))
-        )
-        painter.drawEllipse(
-            QRectF(-13, -5, 30, 15)
-        )
+        painter.setBrush(QBrush(QColor(0, 0, 0, shadow_alpha)))
+        painter.drawEllipse(QRectF(-8.5, -2.7, 18.0, 6.6))
 
-        # Six legs use an alternating tripod gait while grounded. This is only
-        # body rendering derived from biomechanics; it never selects movement.
-        leg_pen = QPen(
-            QColor(35, 28, 22, 235),
-            1.35,
-        )
-        leg_pen.setCapStyle(
-            Qt.PenCapStyle.RoundCap
-        )
+        # Jointed legs are rendered from the six-leg gait model.
+        leg_pen = QPen(QColor(39, 29, 21, 225), 0.78)
+        leg_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(leg_pen)
-        stride = (
-            math.sin(self.gait_phase * 2.0 * math.pi)
-            * 3.2
-            * self.drive
-            if not self.airborne
-            else 0.0
-        )
-        groom_phase = math.sin(self._wing_phase * 2.7) * 4.2
-        for index, (root_x, root_y, end_x, end_y, phase_sign) in enumerate((
-            (-5, -4, -15, -12, 1.0),
-            (1, -5, -3, -16, -1.0),
-            (7, -4, 17, -11, 1.0),
-            (-5, 4, -15, 12, -1.0),
-            (1, 5, -3, 16, 1.0),
-            (7, 4, 17, 11, -1.0),
-        )):
-            groom_x = 0.0
-            groom_y = 0.0
-            if self.behavior == "groom" and index in (2, 5):
-                groom_x = -7.0 + abs(groom_phase)
-                groom_y = -groom_phase if index == 2 else groom_phase
-            painter.drawLine(
-                root_x,
-                root_y,
-                int(round(end_x + phase_sign * stride + groom_x)),
-                int(round(end_y + groom_y)),
-            )
+        if self.legs:
+            for leg in self.legs:
+                root_x = float(leg.root_x)
+                root_y = float(leg.root_y)
+                foot_x = float(leg.foot_x)
+                foot_y = float(leg.foot_y)
+                side = -1.0 if foot_y < 0.0 else 1.0
+                knee_x = root_x * 0.45 + foot_x * 0.55
+                knee_y = (
+                    root_y * 0.38
+                    + foot_y * 0.62
+                    + side * float(leg.lift) * 1.2
+                )
+                painter.drawLine(
+                    int(round(root_x)),
+                    int(round(root_y)),
+                    int(round(knee_x)),
+                    int(round(knee_y)),
+                )
+                painter.drawLine(
+                    int(round(knee_x)),
+                    int(round(knee_y)),
+                    int(round(foot_x)),
+                    int(round(foot_y)),
+                )
+        else:
+            for root_x, root_y, foot_x, foot_y in (
+                (4, -3, 9, -8),
+                (0, -4, 0, -10),
+                (-4, -3, -9, -8),
+                (4, 3, 9, 8),
+                (0, 4, 0, 10),
+                (-4, 3, -9, 8),
+            ):
+                painter.drawLine(root_x, root_y, foot_x, foot_y)
 
-        # Wings flutter visually while airborne. They do not move the body.
-        flap = (
-            math.sin(self._wing_phase) * 2.2
-            if self.airborne
-            else 0.0
-        )
-        painter.setPen(
-            QPen(
-                QColor(70, 65, 58, 115),
-                0.9,
-            )
-        )
-        painter.setBrush(
-            QBrush(
-                QColor(205, 213, 209, 92)
-            )
+        # Transparent wings sit behind the thorax. Airborne wingbeat is shown as
+        # a tiny blur rather than huge flapping shapes.
+        flap = math.sin(self._wing_phase)
+        wing_shift = (1.5 * flap if self.airborne else 0.0)
+        if self.micro_action == "wing_flick":
+            wing_shift += 1.4 * flap
+
+        painter.setPen(QPen(QColor(86, 76, 65, 95), 0.55))
+        painter.setBrush(QBrush(QColor(214, 221, 216, 78)))
+        painter.drawEllipse(
+            QRectF(-4.8, -7.1 - wing_shift, 10.8, 5.3)
         )
         painter.drawEllipse(
-            QRectF(-7, -13 - flap, 18, 11)
+            QRectF(-4.8, 1.8 + wing_shift, 10.8, 5.3)
         )
+        painter.setPen(QPen(QColor(92, 81, 69, 80), 0.45))
+        painter.drawLine(-3, -5, 4, -3)
+        painter.drawLine(-3, 5, 4, 3)
+
+        # Abdomen: elongated, dark-banded, tapered posterior.
+        painter.setPen(QPen(QColor(49, 37, 25, 220), 0.65))
+        painter.setBrush(QBrush(QColor(151, 113, 66, 245)))
+        painter.drawEllipse(QRectF(-8.3, -3.1, 12.8, 6.2))
+        painter.setPen(QPen(QColor(58, 42, 27, 190), 0.70))
+        for x in (-5.2, -2.9, -0.6):
+            painter.drawLine(int(round(x)), -3, int(round(x)), 3)
+
+        # Thorax: compact golden-brown central mass.
+        painter.setPen(QPen(QColor(58, 41, 27, 225), 0.65))
+        painter.setBrush(QBrush(QColor(131, 91, 50, 250)))
+        painter.drawEllipse(QRectF(1.0, -4.2, 8.5, 8.4))
+        painter.setPen(QPen(QColor(191, 150, 92, 95), 0.45))
+        painter.drawLine(4, -3, 5, 3)
+
+        # Head shifts subtly with active head/antenna movements.
+        head_offset = self.head_yaw * 1.7
+        painter.setPen(QPen(QColor(58, 39, 26, 225), 0.60))
+        painter.setBrush(QBrush(QColor(128, 84, 46, 250)))
         painter.drawEllipse(
-            QRectF(-7, 2 + flap, 18, 11)
+            QRectF(8.0, -3.5 + head_offset, 6.0, 7.0)
         )
 
-        # Abdomen.
-        painter.setPen(
-            QPen(QColor(27, 23, 19), 1)
-        )
-        painter.setBrush(
-            QBrush(QColor(48, 39, 30))
-        )
-        painter.drawEllipse(
-            QRectF(-10, -4.8, 18, 9.6)
-        )
-
-        # Thorax.
-        painter.setBrush(
-            QBrush(QColor(62, 49, 35))
-        )
-        painter.drawEllipse(
-            QRectF(2, -6.4, 12.5, 12.8)
-        )
-
-        # Head and compound eyes.
-        painter.setBrush(
-            QBrush(QColor(55, 43, 31))
-        )
-        painter.drawEllipse(
-            QRectF(11, -5.0, 8.5, 10.0)
-        )
+        # Red compound eyes dominate the head silhouette at tiny scale.
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(
-            QBrush(QColor(105, 42, 32))
+        painter.setBrush(QBrush(QColor(151, 39, 31, 245)))
+        painter.drawEllipse(
+            QRectF(10.7, -3.0 + head_offset, 2.5, 2.8)
         )
         painter.drawEllipse(
-            QRectF(15.2, -4.0, 3.2, 3.7)
+            QRectF(10.7, 0.2 + head_offset, 2.5, 2.8)
+        )
+        painter.setBrush(QBrush(QColor(217, 92, 69, 150)))
+        painter.drawEllipse(
+            QRectF(11.4, -2.5 + head_offset, 0.7, 0.7)
         )
         painter.drawEllipse(
-            QRectF(15.2, 0.3, 3.2, 3.7)
+            QRectF(11.4, 0.7 + head_offset, 0.7, 0.7)
         )
 
-        # Antennae.
-        painter.setPen(
-            QPen(
-                QColor(35, 28, 22),
-                0.9,
-            )
+        antenna_phase = math.sin(self._wing_phase * 0.55)
+        if self.micro_action == "antenna_sweep":
+            antenna_phase *= 2.0
+        painter.setPen(QPen(QColor(56, 38, 25, 230), 0.60))
+        painter.drawLine(
+            13,
+            int(round(-1.6 + head_offset)),
+            16,
+            int(round(-3.4 + antenna_phase)),
         )
-        painter.drawLine(18, -2, 22, -5)
-        painter.drawLine(18, 2, 22, 5)
+        painter.drawLine(
+            13,
+            int(round(1.6 + head_offset)),
+            16,
+            int(round(3.4 - antenna_phase)),
+        )
+
+        if self.proboscis_extension > 0.03:
+            painter.setPen(QPen(QColor(72, 45, 30, 235), 0.75))
+            length = 1.0 + 3.3 * self.proboscis_extension
+            painter.drawLine(
+                13,
+                int(round(head_offset)),
+                int(round(13 + length)),
+                int(round(head_offset + 0.7)),
+            )
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
@@ -1295,10 +1332,12 @@ class ControlPanel(QWidget):
             f"Speed {biomechanics.speed:.1f}px/s · "
             f"acceleration {biomechanics.acceleration:.1f}px/s² · "
             f"turn {biomechanics.turn_rate:.2f}rad/s · "
-            f"gait {biomechanics.gait_phase:.2f} · "
+            f"stride {biomechanics.stride_hz:.1f}Hz · "
+            f"stance {biomechanics.stance_count}/6 · "
+            f"tripod {biomechanics.tripod_coherence:.2f} · "
             f"wingbeat {biomechanics.wingbeat_hz:.0f}Hz · "
             f"altitude {biomechanics.altitude:.1f} · "
-            f"vertical {biomechanics.vertical_speed:+.1f} · "
+            f"legs {biomechanics.leg_extension:.2f} · "
             f"substrate {biomechanics.support_title[:28]}"
         )
         if circadian is not None:
@@ -1313,12 +1352,26 @@ class ControlPanel(QWidget):
                 f"Threat arousal · {arousal.threat_arousal:.2f}"
             )
         if ethology is not None:
+            detail = (
+                f"sleep {ethology.sleep_stage}"
+                if ethology.asleep
+                else (
+                    f"groom {ethology.groom_target}"
+                    if ethology.grooming
+                    else (
+                        f"micro {ethology.micro_action}"
+                        if ethology.micro_action
+                        else "active"
+                    )
+                )
+            )
             self.behavior_status.setText(
-                f"Ethology · {ethology.mode.upper()} · "
+                f"Ethology · {ethology.mode.upper()} · {detail} · "
                 f"alert {ethology.alertness:.2f} · "
                 f"threat {ethology.threat_drive:.2f} · "
                 f"food {ethology.food_drive:.2f} · "
-                f"groom need {ethology.grooming_need:.2f}"
+                f"boundary {ethology.boundary_drive:.2f} · "
+                f"landing {ethology.landing_drive:.2f}"
             )
 
     def append_log(self, message: str) -> None:
@@ -1355,11 +1408,14 @@ class FlybitWindow(QObject):
         self.life = LifeModel(self.state)
         self.circadian = CircadianModel(self.state)
         self.arousal = ThreatArousalModel()
+        self.phenotype = phenotype_from_identity(self.state.created_at)
         self.ethology = EthologyModel(
-            seed=64,
+            seed=seed_from_identity(self.state.created_at),
             grooming_need=float(getattr(self.state, "grooming_need", 0.18)),
             threat_memory=float(getattr(self.state, "threat_memory", 0.0)),
+            phenotype=self.phenotype,
         )
+        self.ethogram = EthogramRecorder()
         self.olfaction = FoodOdorModel()
         if offline_elapsed > 1.0:
             self.care.tick(offline_elapsed)
@@ -1418,7 +1474,8 @@ class FlybitWindow(QObject):
                 x=start_x,
                 y=start_y,
                 heading=float(self.state.heading),
-            )
+            ),
+            phenotype=self.phenotype,
         )
         self.latest_neural_motor = MotorActivity()
         self.latest_motor = MotorActivity()
@@ -1573,18 +1630,29 @@ class FlybitWindow(QObject):
         arousal = self.arousal.snapshot()
 
         odor = self._sample_odor()
+        bounds = self._desktop_bounds()
+        body_before = self.kinematics.state
+        edge = boundary_cue(
+            self.surfaces,
+            body_before.x,
+            body_before.y,
+            body_before.heading,
+            bounds,
+        )
         ethology = self.ethology.tick(
             dt,
             neural=self.latest_neural_motor if life.alive else MotorActivity(),
             sensory=self.latest_sensory,
             odor=odor,
+            boundary=edge,
+            heading=body_before.heading,
             hunger_drive=self.care.homeostatic_drive,
             rest_drive=circadian.rest_drive,
             activity=life.activity,
             boldness=life.boldness,
             curiosity=life.curiosity,
             threat_arousal=arousal.threat_arousal,
-            airborne=self.kinematics.state.airborne,
+            airborne=body_before.airborne,
         )
         self.latest_ethology = ethology
         self.latest_motor = ethology.motor if life.alive else MotorActivity()
@@ -1600,7 +1668,6 @@ class FlybitWindow(QObject):
             circadian.rest_drive,
             arousal.threat_arousal,
         )
-        bounds = self._desktop_bounds()
         physiology_gain = life.vitality * (0.78 + 0.30 * life.activity)
         if not life.alive:
             physiology_gain = 0.0
@@ -1610,6 +1677,9 @@ class FlybitWindow(QObject):
             bounds,
             dt=dt,
             physiology_gain=physiology_gain,
+            landing_drive=ethology.landing_drive,
+            groom_target=ethology.groom_target,
+            micro_action=ethology.micro_action,
         )
 
         for event in events:
@@ -1617,9 +1687,13 @@ class FlybitWindow(QObject):
                 self.panel.append_log(
                     f"flight settled · {event.detail}"
                 )
+            elif event.kind == "takeoff_prepare":
+                self.panel.append_log(
+                    "escape preload · legs compressing"
+                )
             elif event.kind == "takeoff":
                 self.panel.append_log(
-                    f"{ethology.mode} → altitude takeoff"
+                    f"{ethology.mode} → jump + wing takeoff"
                 )
             elif event.kind == "surface_contact":
                 self.panel.append_log(
@@ -1628,6 +1702,12 @@ class FlybitWindow(QObject):
 
         body = self.kinematics.state
         bio = self.kinematics.biomechanics()
+        self.ethogram.update(
+            dt,
+            mode=ethology.mode,
+            speed=bio.speed,
+            turn_rate=bio.turn_rate,
+        )
         self.fly.set_pose(
             heading=body.heading,
             airborne=body.airborne,
@@ -1639,6 +1719,14 @@ class FlybitWindow(QObject):
             gait_phase=bio.gait_phase,
             altitude=bio.altitude,
             behavior=ethology.mode,
+            legs=bio.legs,
+            body_bob=bio.body_bob,
+            head_yaw=ethology.head_yaw,
+            proboscis_extension=ethology.proboscis_extension,
+            groom_target=ethology.groom_target,
+            micro_action=ethology.micro_action,
+            leg_extension=bio.leg_extension,
+            body_scale=self.phenotype.body_scale,
         )
         self._position_overlay()
 

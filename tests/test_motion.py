@@ -70,6 +70,28 @@ class MotionBridgeTest(unittest.TestCase):
             )
         )
 
+    def test_takeoff_has_preload_before_airborne_phase(self):
+        body = FlyBodyState(
+            x=200.0,
+            y=200.0,
+            heading=0.0,
+        )
+        model = FlyKinematics(body)
+        events = model.update(
+            MotorActivity(
+                escape_left=1.0,
+                escape_right=1.0,
+            ),
+            [],
+            (0.0, 0.0, 800.0, 600.0),
+            dt=0.020,
+        )
+        self.assertFalse(body.airborne)
+        self.assertTrue(
+            any(event.kind == "takeoff_prepare" for event in events)
+        )
+        self.assertGreater(model.biomechanics().takeoff_preload, 0.0)
+
     def test_asymmetric_escape_changes_heading(self):
         body = FlyBodyState(
             x=200.0,
@@ -151,6 +173,33 @@ class MotionBridgeTest(unittest.TestCase):
         self.assertTrue(body.airborne)
         self.assertGreater(body.x, 220.0)
         self.assertGreater(body.flight_energy, 0.05)
+
+    def test_landing_drive_extends_legs_and_descends(self):
+        body = FlyBodyState(
+            x=300.0,
+            y=240.0,
+            heading=0.0,
+            airborne=True,
+            altitude=40.0,
+            vertical_velocity=0.0,
+            flight_energy=1.0,
+        )
+        model = FlyKinematics(body)
+        before = body.altitude
+        for _ in range(20):
+            model.update(
+                MotorActivity(
+                    flight_left=0.10,
+                    flight_right=0.10,
+                ),
+                [],
+                (0.0, 0.0, 800.0, 600.0),
+                dt=0.020,
+                landing_drive=1.0,
+            )
+        bio = model.biomechanics()
+        self.assertGreater(bio.leg_extension, 0.8)
+        self.assertLess(body.altitude, before)
 
     def test_corner_can_leave_when_neural_steering_turns_inward(self):
         body = FlyBodyState(

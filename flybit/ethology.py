@@ -1,13 +1,8 @@
-"""Modeled ethology layer for lifelike desktop behaviour.
+"""Modeled ethology/VNC layer for lifelike desktop behaviour.
 
-This module sits between neural descending output and body mechanics. It does
-not inspect semantic desktop labels or cursor identity. Instead it combines
-neural motor activity with sensory quantities (looming, near-field disturbance,
-food odor), internal drives and stochastic bout timing to model behavioural
-states that are missing from the simplified whole-CNS neuron model.
-
-The layer is deliberately labelled MODELED: it is an ethological/VNC bridge,
-not a claim that MaleCNS alone currently reproduces every behaviour below.
+The controller consumes neural motor activity, non-semantic sensory quantities,
+internal physiology and geometric boundary cues. It never inspects application
+names or maps cursor identity directly to actions.
 """
 from __future__ import annotations
 
@@ -16,6 +11,20 @@ import math
 import random
 
 from .motion import MotorActivity
+from .phenotype import IndividualPhenotype
+
+
+_NEUTRAL_PHENOTYPE = IndividualPhenotype(
+    stride_scale=1.0,
+    turn_bias=0.0,
+    pause_scale=1.0,
+    grooming_bias=1.0,
+    startle_bias=0.0,
+    flight_saccade_scale=1.0,
+    micro_activity=1.0,
+    body_scale=1.0,
+    handedness=0.0,
+)
 
 
 @dataclass(frozen=True)
@@ -24,6 +33,14 @@ class EthologySnapshot:
     motor: MotorActivity
     asleep: bool
     grooming: bool
+    sleep_stage: str
+    groom_target: str
+    micro_action: str
+    proboscis_extension: float
+    head_yaw: float
+    landing_drive: float
+    flight_saccade: float
+    boundary_drive: float
     alertness: float
     threat_drive: float
     food_drive: float
@@ -31,24 +48,29 @@ class EthologySnapshot:
 
 
 class EthologyModel:
-    """Competing semi-Markov motor programmes for a desktop fly.
-
-    The controller never receives object names. Visual threat comes from raw
-    retinal expansion; food approach comes from the synthetic bilateral odor
-    field. Neural descending activity always survives into the final motor
-    command and can override quieter autonomous bouts.
-    """
+    """Competing semi-Markov motor programs with persistent individuality."""
 
     MODES = {
         "idle",
         "walk",
         "turn",
+        "boundary",
         "forage",
         "feed",
         "groom",
         "sleep",
         "escape",
         "flight",
+        "landing",
+    }
+
+    _GROOM_PRIORITY = {
+        "eyes": 1.32,
+        "antennae": 1.23,
+        "proboscis": 1.12,
+        "abdomen": 0.98,
+        "wings": 0.88,
+        "thorax": 0.80,
     }
 
     def __init__(
@@ -57,36 +79,70 @@ class EthologyModel:
         seed: int = 64,
         grooming_need: float = 0.18,
         threat_memory: float = 0.0,
+        phenotype: IndividualPhenotype | None = None,
     ) -> None:
         self.rng = random.Random(int(seed))
+        self.phenotype = phenotype or _NEUTRAL_PHENOTYPE
         self.mode = "idle"
         self.mode_elapsed = 0.0
         self.bout_remaining = 0.35
-        self.alertness = max(0.0, min(1.0, float(threat_memory)))
-        self.grooming_need = max(0.0, min(1.0, float(grooming_need)))
+        self.alertness = self._clamp01(threat_memory)
+        self.grooming_need = self._clamp01(grooming_need)
         self._wander_bias = 0.0
         self._search_phase = self.rng.random() * math.tau
+        self._groom_target = ""
+        self._micro_action = ""
+        self._micro_remaining = 0.0
+        self._flight_elapsed = 0.0
+        self._saccade_remaining = 0.0
+        self._saccade_sign = 0.0
+        self._saccade_cooldown = self.rng.uniform(0.35, 1.2)
+
+        base = self.grooming_need
+        self._groom_load = {
+            "eyes": self._clamp01(base * 0.92),
+            "antennae": self._clamp01(base * 0.84),
+            "proboscis": self._clamp01(base * 0.48),
+            "abdomen": self._clamp01(base * 0.62),
+            "wings": self._clamp01(base * 0.55),
+            "thorax": self._clamp01(base * 0.50),
+        }
 
     @staticmethod
     def _clamp01(value: float) -> float:
         return max(0.0, min(1.0, float(value)))
 
+    @staticmethod
+    def _wrap(value: float) -> float:
+        return (float(value) + math.pi) % math.tau - math.pi
+
     def _set_mode(self, mode: str, seconds: float) -> None:
         if mode not in self.MODES:
             raise ValueError(f"unknown ethology mode: {mode}")
+        changed = mode != self.mode
         self.mode = mode
-        self.mode_elapsed = 0.0
+        if changed:
+            self.mode_elapsed = 0.0
+            self._micro_action = ""
+            self._micro_remaining = 0.0
         self.bout_remaining = max(0.04, float(seconds))
-        if mode in {"walk", "turn"}:
-            self._wander_bias = self.rng.uniform(-1.0, 1.0)
+        if changed and mode in {"walk", "turn"}:
+            self._wander_bias = max(
+                -1.0,
+                min(
+                    1.0,
+                    self.rng.uniform(-1.0, 1.0)
+                    + 0.34 * self.phenotype.turn_bias,
+                ),
+            )
+        if changed and mode == "groom":
+            self._groom_target = self._choose_groom_target()
 
     def begin_feeding(self, seconds: float = 1.4) -> None:
-        """Enter a stationary feeding bout after physical food contact."""
         self._set_mode("feed", max(0.35, float(seconds)))
 
     @staticmethod
     def _max_motor(a: MotorActivity, b: MotorActivity) -> MotorActivity:
-        """Preserve neural output while allowing modeled programmes to add drive."""
         return MotorActivity(
             forward_left=max(a.forward_left, b.forward_left),
             forward_right=max(a.forward_right, b.forward_right),
@@ -100,36 +156,160 @@ class EthologyModel:
             flight_right=max(a.flight_right, b.flight_right),
         )
 
-    def _choose_quiet_mode(
+    def _choose_groom_target(self) -> str:
+        best = "eyes"
+        best_score = -1.0
+        for target, load in self._groom_load.items():
+            priority = self._GROOM_PRIORITY[target]
+            score = (
+                load * priority
+                + self.rng.uniform(-0.045, 0.045)
+            )
+            if score > best_score:
+                best_score = score
+                best = target
+        return best
+
+    def _update_groom_load(self, dt: float, movement_load: float) -> None:
+        deposition = dt * (0.0025 + 0.011 * movement_load)
+        factors = {
+            "eyes": 1.08,
+            "antennae": 1.12,
+            "proboscis": 0.62,
+            "abdomen": 0.82,
+            "wings": 0.90,
+            "thorax": 0.72,
+        }
+        for target in self._groom_load:
+            self._groom_load[target] = self._clamp01(
+                self._groom_load[target] + deposition * factors[target]
+            )
+        self.grooming_need = max(self._groom_load.values())
+
+    def _choose_ground_mode(
         self,
         *,
-        hunger_drive: float,
+        hunger: float,
         food_drive: float,
-        rest_drive: float,
+        rest: float,
         activity: float,
         curiosity: float,
+        boundary_drive: float,
     ) -> None:
-        if rest_drive > 0.64 and food_drive < 0.18:
-            self._set_mode("sleep", self.rng.uniform(5.0, 18.0))
-            return
+        """Choose among competing drives using noisy activation, not hard order."""
+        groom = self.grooming_need * self.phenotype.grooming_bias
+        scores = {
+            "sleep": 0.10 + 1.65 * rest - 0.45 * food_drive,
+            "forage": 0.06 + 1.25 * food_drive + 0.45 * hunger,
+            "groom": 0.18 + 1.25 * groom,
+            "boundary": 0.12 + 1.10 * boundary_drive,
+            "walk": 0.46 + 0.50 * activity + 0.20 * curiosity,
+            "turn": 0.28 + 0.20 * curiosity + 0.10 * abs(self.phenotype.turn_bias),
+            "idle": 0.48 + 0.28 * (1.0 - activity),
+        }
 
-        if food_drive > 0.16 and hunger_drive > 0.18:
-            self._set_mode("forage", self.rng.uniform(0.8, 2.4))
-            return
+        if rest < 0.42:
+            scores["sleep"] -= 0.55
+        if food_drive < 0.12:
+            scores["forage"] -= 0.52
+        if groom < 0.48:
+            scores["groom"] -= 0.52
+        if boundary_drive < 0.28:
+            scores["boundary"] -= 0.60
 
-        groom_threshold = 0.64 - 0.10 * (1.0 - activity)
-        if self.grooming_need >= groom_threshold:
-            self._set_mode("groom", self.rng.uniform(0.7, 2.0))
-            return
+        # Competing behaviours are sampled from a softmax rather than
+        # taking a hard winner. This preserves strong drive dominance (sleep
+        # when exhausted, forage when odor/hunger are high) while allowing
+        # lower-probability sharp turns, pauses and grooming bouts to appear
+        # naturally instead of becoming unreachable states.
+        temperature = 0.24
+        peak = max(scores.values())
+        weighted = [
+            (
+                key,
+                math.exp((value - peak) / temperature),
+            )
+            for key, value in scores.items()
+        ]
+        total = sum(weight for _, weight in weighted)
+        roll = self.rng.random() * total
+        mode = weighted[-1][0]
+        cumulative = 0.0
+        for key, weight in weighted:
+            cumulative += weight
+            if roll <= cumulative:
+                mode = key
+                break
 
-        walk_probability = 0.34 + 0.34 * activity + 0.18 * curiosity
-        roll = self.rng.random()
-        if roll < walk_probability:
-            self._set_mode("walk", self.rng.uniform(0.35, 1.65))
-        elif roll < walk_probability + 0.23:
-            self._set_mode("turn", self.rng.uniform(0.12, 0.48))
+        pause_scale = self.phenotype.pause_scale
+        if mode == "sleep":
+            self._set_mode("sleep", self.rng.uniform(5.0, 16.0) * pause_scale)
+        elif mode == "forage":
+            self._set_mode("forage", self.rng.uniform(0.7, 2.5))
+        elif mode == "groom":
+            self._set_mode("groom", self.rng.uniform(0.55, 1.65))
+        elif mode == "boundary":
+            self._set_mode("boundary", self.rng.uniform(0.45, 2.2))
+        elif mode == "walk":
+            self._set_mode("walk", self.rng.uniform(0.28, 1.55))
+        elif mode == "turn":
+            self._set_mode("turn", self.rng.uniform(0.10, 0.42))
         else:
-            self._set_mode("idle", self.rng.uniform(0.18, 1.10))
+            self._set_mode(
+                "idle",
+                self.rng.uniform(0.16, 0.95) * pause_scale,
+            )
+
+    def _sleep_stage(self) -> str:
+        if self.mode != "sleep":
+            return "awake"
+        if self.mode_elapsed < 1.8:
+            return "drowsy"
+        if self.mode_elapsed < 7.0:
+            return "light"
+        return "deep"
+
+    def _update_micro_action(self, dt: float) -> tuple[str, float, float]:
+        if self.mode != "idle":
+            self._micro_action = ""
+            self._micro_remaining = 0.0
+            return "", 0.0, 0.0
+
+        self._micro_remaining -= dt
+        if self._micro_remaining <= 0.0:
+            choices = [
+                "antenna_sweep",
+                "head_turn",
+                "leg_adjust",
+                "wing_flick",
+                "still",
+                "still",
+                "proboscis",
+            ]
+            self._micro_action = self.rng.choice(choices)
+            self._micro_remaining = self.rng.uniform(0.18, 0.72) / max(
+                0.65,
+                self.phenotype.micro_activity,
+            )
+
+        phase = math.sin(self.mode_elapsed * 8.5 + self.phenotype.handedness)
+        head_yaw = 0.0
+        proboscis = 0.0
+        if self._micro_action in {"antenna_sweep", "head_turn"}:
+            head_yaw = 0.24 * phase
+        if self._micro_action == "proboscis":
+            proboscis = 0.35 + 0.20 * (0.5 + 0.5 * phase)
+        return self._micro_action, head_yaw, proboscis
+
+    def _trigger_saccade(self, sign: float, strength: float = 1.0) -> None:
+        self._saccade_sign = -1.0 if sign < 0.0 else 1.0
+        self._saccade_remaining = self.rng.uniform(0.045, 0.095)
+        self._saccade_cooldown = self.rng.uniform(0.55, 1.55) / max(
+            0.65,
+            self.phenotype.flight_saccade_scale,
+        )
+        if strength > 0.75:
+            self._saccade_remaining *= 1.15
 
     def tick(
         self,
@@ -138,6 +318,8 @@ class EthologyModel:
         neural: MotorActivity,
         sensory=None,
         odor=None,
+        boundary=None,
+        heading: float = 0.0,
         hunger_drive: float = 0.0,
         rest_drive: float = 0.0,
         activity: float = 0.5,
@@ -163,6 +345,7 @@ class EthologyModel:
         disturbance = self._clamp01(
             getattr(sensory, "mechanosensory_disturbance", 0.0)
         )
+        optic_flow = float(getattr(sensory, "optic_flow", 0.0))
         loom = max(loom_left, loom_right)
         threat = self._clamp01(
             max(neural.escape, 0.88 * loom + 0.24 * disturbance)
@@ -178,6 +361,8 @@ class EthologyModel:
             odor_salience * (0.30 + 0.70 * hunger)
         )
 
+        boundary_drive = self._clamp01(getattr(boundary, "strength", 0.0))
+
         self.alertness *= math.exp(-dt / 12.0)
         if threat > 0.0:
             self.alertness = max(
@@ -192,50 +377,119 @@ class EthologyModel:
             neural.flight,
             neural.escape,
         )
-        self.grooming_need = self._clamp01(
-            self.grooming_need
-            + dt * (0.004 + 0.012 * movement_load)
-        )
+        self._update_groom_load(dt, movement_load)
 
         self.mode_elapsed += dt
         self.bout_remaining -= dt
 
-        escape_threshold = max(
-            0.16,
-            min(0.62, 0.42 + 0.18 * boldness - 0.22 * self.alertness),
-        )
-        neural_escape = neural.escape > 0.0
-        if neural_escape or threat >= escape_threshold:
-            self._set_mode("escape", self.rng.uniform(0.16, 0.42))
-        elif airborne:
-            if self.mode != "escape":
-                self._set_mode("flight", max(0.25, self.bout_remaining))
-        elif self.mode == "sleep":
-            wake_threshold = 0.18 + 0.24 * rest
-            if threat >= wake_threshold or neural.forward > 0.12:
-                self._set_mode(
-                    "escape" if threat >= wake_threshold else "idle",
-                    0.24,
+        landing_drive = 0.0
+        flight_saccade = 0.0
+
+        if airborne:
+            self._flight_elapsed += dt
+            self._saccade_cooldown -= dt
+
+            if self.mode == "escape" and self.bout_remaining <= 0.0:
+                self._set_mode("flight", self.rng.uniform(0.45, 1.8))
+            elif self.mode not in {"flight", "landing", "escape"}:
+                self._set_mode("flight", self.rng.uniform(0.45, 1.8))
+
+            # In flight, coherent expansion can prepare landing instead of
+            # blindly reusing the grounded escape program.
+            if (
+                self._flight_elapsed > 0.24
+                and 0.11 <= loom <= 0.72
+                and self.mode != "escape"
+            ):
+                self._set_mode("landing", self.rng.uniform(0.28, 0.75))
+
+            if self.mode == "landing":
+                landing_drive = self._clamp01(
+                    0.32 + 1.20 * loom + 0.15 * min(1.0, abs(optic_flow))
                 )
-            elif self.bout_remaining <= 0.0:
-                if rest > 0.52:
-                    self._set_mode("sleep", self.rng.uniform(4.0, 15.0))
-                else:
-                    self._choose_quiet_mode(
-                        hunger_drive=hunger,
-                        food_drive=food_drive,
-                        rest_drive=rest,
-                        activity=activity,
-                        curiosity=curiosity,
+                if loom < 0.025 and self.bout_remaining <= 0.0:
+                    self._set_mode("flight", self.rng.uniform(0.4, 1.2))
+
+            # Strong/asymmetric expansion or spontaneous free-flight timing can
+            # evoke a short yaw saccade.
+            if self._saccade_remaining <= 0.0:
+                if loom > 0.48 and self._saccade_cooldown <= 0.0:
+                    away = loom_left - loom_right
+                    if abs(away) < 0.05:
+                        away = self.phenotype.handedness or 1.0
+                    self._trigger_saccade(away, loom)
+                elif (
+                    self._saccade_cooldown <= 0.0
+                    and self.rng.random()
+                    < 0.018 * self.phenotype.flight_saccade_scale
+                ):
+                    self._trigger_saccade(
+                        self.rng.choice((-1.0, 1.0)),
+                        0.35,
                     )
-        elif self.bout_remaining <= 0.0:
-            self._choose_quiet_mode(
-                hunger_drive=hunger,
-                food_drive=food_drive,
-                rest_drive=rest,
-                activity=activity,
-                curiosity=curiosity,
+
+            if self._saccade_remaining > 0.0:
+                self._saccade_remaining -= dt
+                flight_saccade = self._saccade_sign
+
+        else:
+            self._flight_elapsed = 0.0
+            self._saccade_remaining = 0.0
+
+            escape_threshold = max(
+                0.14,
+                min(
+                    0.64,
+                    0.42
+                    + 0.18 * boldness
+                    - 0.22 * self.alertness
+                    + self.phenotype.startle_bias,
+                ),
             )
+            neural_escape = neural.escape > 0.0
+
+            if neural_escape or threat >= escape_threshold:
+                self._set_mode("escape", self.rng.uniform(0.15, 0.38))
+            elif self.mode == "sleep":
+                stage = self._sleep_stage()
+                stage_threshold = {
+                    "drowsy": 0.16,
+                    "light": 0.24,
+                    "deep": 0.36,
+                }[stage]
+                wake_threshold = stage_threshold + 0.08 * rest
+                if threat >= wake_threshold or neural.forward > 0.16:
+                    self._set_mode(
+                        "escape" if threat >= wake_threshold else "idle",
+                        0.22,
+                    )
+                elif self.bout_remaining <= 0.0:
+                    if rest > 0.50:
+                        self._set_mode(
+                            "sleep",
+                            self.rng.uniform(4.5, 15.0)
+                            * self.phenotype.pause_scale,
+                        )
+                    else:
+                        self._choose_ground_mode(
+                            hunger=hunger,
+                            food_drive=food_drive,
+                            rest=rest,
+                            activity=activity,
+                            curiosity=curiosity,
+                            boundary_drive=boundary_drive,
+                        )
+            elif self.mode == "boundary" and boundary_drive < 0.08:
+                self.bout_remaining = 0.0
+            elif self.bout_remaining <= 0.0:
+                self._choose_ground_mode(
+                    hunger=hunger,
+                    food_drive=food_drive,
+                    rest=rest,
+                    activity=activity,
+                    curiosity=curiosity,
+                    boundary_drive=boundary_drive,
+                )
 
         intent = MotorActivity()
 
@@ -258,12 +512,17 @@ class EthologyModel:
                 flight_right=max(neural.flight_right, 0.32),
             )
 
-        elif self.mode == "flight":
+        elif self.mode in {"flight", "landing"}:
+            saccade = flight_saccade * 0.82
+            thrust = 0.16 if self.mode == "flight" else 0.045
+            forward = 0.18 if self.mode == "flight" else 0.08
             intent = MotorActivity(
-                forward_left=0.18,
-                forward_right=0.18,
-                flight_left=0.16,
-                flight_right=0.16,
+                forward_left=forward,
+                forward_right=forward,
+                steer_left=max(0.0, -saccade),
+                steer_right=max(0.0, saccade),
+                flight_left=thrust,
+                flight_right=thrust,
             )
 
         elif self.mode == "forage":
@@ -273,7 +532,12 @@ class EthologyModel:
             )
             steer = max(
                 -1.0,
-                min(1.0, odor_gradient * 2.6 + 0.34 * cast),
+                min(
+                    1.0,
+                    odor_gradient * 2.6
+                    + 0.34 * cast
+                    + 0.10 * self.phenotype.turn_bias,
+                ),
             )
             speed = 0.18 + 0.34 * hunger + 0.20 * odor_mean
             intent = MotorActivity(
@@ -283,9 +547,38 @@ class EthologyModel:
                 steer_right=max(0.0, steer) * 0.58,
             )
 
+        elif self.mode == "boundary" and boundary is not None:
+            tangent = float(getattr(boundary, "tangent_heading", heading))
+            inward = float(getattr(boundary, "inward_heading", heading))
+            # Stay roughly parallel while adding a small inward correction at
+            # very high edge proximity.
+            target = tangent
+            if boundary_drive > 0.82:
+                blend = (boundary_drive - 0.82) / 0.18
+                tx = (
+                    (1.0 - blend) * math.cos(tangent)
+                    + blend * math.cos(inward)
+                )
+                ty = (
+                    (1.0 - blend) * math.sin(tangent)
+                    + blend * math.sin(inward)
+                )
+                target = math.atan2(ty, tx)
+            error = self._wrap(target - float(heading))
+            steer = max(-1.0, min(1.0, error / 0.85))
+            intent = MotorActivity(
+                forward_left=0.22,
+                forward_right=0.22,
+                steer_left=max(0.0, -steer) * 0.62,
+                steer_right=max(0.0, steer) * 0.62,
+            )
+
         elif self.mode == "walk":
             speed = 0.12 + 0.25 * activity + 0.08 * curiosity
-            steer = self._wander_bias * (0.10 + 0.18 * curiosity)
+            steer = (
+                self._wander_bias * (0.10 + 0.18 * curiosity)
+                + 0.06 * self.phenotype.turn_bias
+            )
             intent = MotorActivity(
                 forward_left=speed,
                 forward_right=speed,
@@ -294,18 +587,30 @@ class EthologyModel:
             )
 
         elif self.mode == "turn":
-            steer = self._wander_bias or 1.0
+            steer = self._wander_bias or (
+                self.phenotype.handedness or 1.0
+            )
             intent = MotorActivity(
-                forward_left=0.08,
-                forward_right=0.08,
-                steer_left=max(0.0, -steer) * 0.46,
-                steer_right=max(0.0, steer) * 0.46,
+                forward_left=0.07,
+                forward_right=0.07,
+                steer_left=max(0.0, -steer) * 0.50,
+                steer_right=max(0.0, steer) * 0.50,
             )
 
         elif self.mode == "groom":
-            self.grooming_need = self._clamp01(
-                self.grooming_need - dt * 0.28
+            target = self._groom_target or self._choose_groom_target()
+            self._groom_target = target
+            self._groom_load[target] = self._clamp01(
+                self._groom_load[target] - dt * 0.48
             )
+            self.grooming_need = max(self._groom_load.values())
+
+        micro_action, head_yaw, proboscis = self._update_micro_action(dt)
+        if self.mode == "feed":
+            proboscis = 1.0
+            head_yaw = 0.04 * math.sin(self.mode_elapsed * 5.0)
+        elif self.mode == "groom":
+            head_yaw = 0.10 * math.sin(self.mode_elapsed * 10.0)
 
         motor = self._max_motor(neural, intent)
         if (
@@ -347,6 +652,14 @@ class EthologyModel:
             motor=motor,
             asleep=self.mode == "sleep",
             grooming=self.mode == "groom",
+            sleep_stage=self._sleep_stage(),
+            groom_target=self._groom_target if self.mode == "groom" else "",
+            micro_action=micro_action,
+            proboscis_extension=float(proboscis),
+            head_yaw=float(head_yaw),
+            landing_drive=float(landing_drive),
+            flight_saccade=float(flight_saccade),
+            boundary_drive=float(boundary_drive),
             alertness=float(self.alertness),
             threat_drive=float(threat),
             food_drive=float(food_drive),

@@ -208,6 +208,66 @@ class SensoryDynamicsTest(unittest.TestCase):
             sparse_snap.retinal_loom_left,
         )
 
+    def test_compound_eye_coherence_rejects_single_row_change(self):
+        base = np.full((3, 3, 128), 0.9, dtype=np.float32)
+        sparse = base.copy()
+        sparse[0, :, 20:34] = 0.1
+        coherent = base.copy()
+        coherent[:, :, 20:34] = 0.1
+
+        sparse_model = DesktopMotionModel()
+        sparse_model.update(
+            body_x=0.0,
+            body_y=0.0,
+            heading=0.0,
+            cursor_x=500.0,
+            cursor_y=0.0,
+            luminance=base.mean(axis=(0, 1)),
+            radial_luminance=base.mean(axis=0),
+            compound_luminance=base,
+            timestamp=1.0,
+        )
+        sparse_snap = sparse_model.update(
+            body_x=0.0,
+            body_y=0.0,
+            heading=0.0,
+            cursor_x=500.0,
+            cursor_y=0.0,
+            luminance=sparse.mean(axis=(0, 1)),
+            radial_luminance=sparse.mean(axis=0),
+            compound_luminance=sparse,
+            timestamp=1.020,
+        )
+
+        coherent_model = DesktopMotionModel()
+        coherent_model.update(
+            body_x=0.0,
+            body_y=0.0,
+            heading=0.0,
+            cursor_x=500.0,
+            cursor_y=0.0,
+            luminance=base.mean(axis=(0, 1)),
+            radial_luminance=base.mean(axis=0),
+            compound_luminance=base,
+            timestamp=1.0,
+        )
+        coherent_snap = coherent_model.update(
+            body_x=0.0,
+            body_y=0.0,
+            heading=0.0,
+            cursor_x=500.0,
+            cursor_y=0.0,
+            luminance=coherent.mean(axis=(0, 1)),
+            radial_luminance=coherent.mean(axis=0),
+            compound_luminance=coherent,
+            timestamp=1.020,
+        )
+
+        self.assertGreater(
+            coherent_snap.retinal_loom_left,
+            sparse_snap.retinal_loom_left,
+        )
+
     def test_panorama_shift_is_visible_as_optic_flow(self):
         model = DesktopMotionModel()
         x = np.linspace(0.0, 2.0 * np.pi, 128, endpoint=False)

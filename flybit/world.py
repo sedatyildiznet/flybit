@@ -1,14 +1,15 @@
 """Windows desktop geometry exposed to the Flybit body simulation.
 
-This module does not choose behaviour. It converts visible top-level windows
-into substrate rectangles so body contact/landing can be grounded in the
-current desktop geometry. Application names remain observer metadata only.
+The world model remains behaviour-agnostic. It exposes visible substrate
+rectangles, support identity and local edge geometry so the ethology layer can
+react to boundaries without inspecting application names.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 import ctypes
 from ctypes import wintypes
+import math
 import os
 import sys
 
@@ -24,6 +25,7 @@ class Surface:
     bottom: float
     title: str = ""
     z_order: int = 0
+    kind: str = "window"
 
     @property
     def width(self) -> float:
@@ -47,16 +49,35 @@ class Surface:
         )
 
 
+@dataclass(frozen=True)
+class BoundaryCue:
+    """Geometric proximity to the current substrate boundary."""
+
+    distance: float
+    strength: float
+    tangent_heading: float
+    inward_heading: float
+    edge: str
+    source_id: int | None
+    source_title: str
+
+
+def _wrap_angle(value: float) -> float:
+    return (float(value) + math.pi) % (2.0 * math.pi) - math.pi
+
+
+def _closest_heading(current: float, a: float, b: float) -> float:
+    da = abs(_wrap_angle(a - current))
+    db = abs(_wrap_angle(b - current))
+    return a if da <= db else b
+
+
 def support_at(
     surfaces: list[Surface],
     x: float,
     y: float,
 ) -> Surface | None:
-    """Return the topmost visible window under a desktop coordinate.
-
-    A None result means the underlying desktop/glass plane. This is geometry
-    only; it never changes heading or chooses a movement.
-    """
+    """Return the topmost visible window under a desktop coordinate."""
     candidates = [
         surface
         for surface in surfaces
@@ -67,12 +88,71 @@ def support_at(
     return min(candidates, key=lambda surface: surface.z_order)
 
 
-class WindowSurfaceScanner:
-    """Read visible top-level Windows using the Win32 API.
+def boundary_cue(
+    surfaces: list[Surface],
+    x: float,
+    y: float,
+    heading: float,
+    bounds: tuple[float, float, float, float],
+    *,
+    margin: float = 30.0,
+) -> BoundaryCue:
+    """Return a non-semantic edge cue for the substrate under the body.
 
-    Flybit's own process windows are excluded so the organism cannot treat its
-    overlay/control panel as an external substrate.
+    Window borders and desktop/screen borders become 2.5-D environmental
+    geometry. Application labels are returned only as telemetry and are never
+    required to compute the cue.
     """
+    margin = max(1.0, float(margin))
+    support = support_at(surfaces, x, y)
+    if support is None:
+        left, top, right, bottom = map(float, bounds)
+        source_id = None
+        source_title = "Desktop"
+    else:
+        left = support.left
+        top = support.top
+        right = support.right
+        bottom = support.bottom
+        source_id = support.id
+        source_title = support.title or support.kind.title()
+
+    distances = {
+        "left": abs(float(x) - left),
+        "right": abs(right - float(x)),
+        "top": abs(float(y) - top),
+        "bottom": abs(bottom - float(y)),
+    }
+    edge = min(distances, key=distances.get)
+    distance = max(0.0, distances[edge])
+    strength = max(0.0, min(1.0, (margin - distance) / margin))
+
+    if edge == "left":
+        tangent = _closest_heading(heading, math.pi / 2.0, -math.pi / 2.0)
+        inward = 0.0
+    elif edge == "right":
+        tangent = _closest_heading(heading, math.pi / 2.0, -math.pi / 2.0)
+        inward = math.pi
+    elif edge == "top":
+        tangent = _closest_heading(heading, 0.0, math.pi)
+        inward = math.pi / 2.0
+    else:
+        tangent = _closest_heading(heading, 0.0, math.pi)
+        inward = -math.pi / 2.0
+
+    return BoundaryCue(
+        distance=distance,
+        strength=strength,
+        tangent_heading=_wrap_angle(tangent),
+        inward_heading=_wrap_angle(inward),
+        edge=edge,
+        source_id=source_id,
+        source_title=source_title,
+    )
+
+
+class WindowSurfaceScanner:
+    """Read visible top-level Windows using the Win32 API."""
 
     def __init__(self) -> None:
         self._own_pid = os.getpid()
@@ -117,7 +197,7 @@ class WindowSurfaceScanner:
 
             width = rect.right - rect.left
             height = rect.bottom - rect.top
-            if width < 120 or height < 60:
+            if width < 80 or height < 32:
                 return True
 
             class_name = ctypes.create_unicode_buffer(128)
@@ -126,13 +206,15 @@ class WindowSurfaceScanner:
                 class_name,
                 len(class_name),
             )
-            if class_name.value in {
-                "Progman",
-                "WorkerW",
-                "Shell_TrayWnd",
-                "Shell_SecondaryTrayWnd",
-            }:
+            cls = class_name.value
+            if cls in {"Progman", "WorkerW"}:
                 return True
+
+            kind = (
+                "taskbar"
+                if cls in {"Shell_TrayWnd", "Shell_SecondaryTrayWnd"}
+                else "window"
+            )
 
             title_len = user32.GetWindowTextLengthW(hwnd)
             title = ""
@@ -156,6 +238,7 @@ class WindowSurfaceScanner:
                     bottom=float(rect.bottom),
                     title=title,
                     z_order=current_z,
+                    kind=kind,
                 )
             )
             return True
