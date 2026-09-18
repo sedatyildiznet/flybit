@@ -1,9 +1,7 @@
 """Raw desktop luminance sampling for Flybit's compound-eye input.
 
-No object detection, OCR, window classification or threat heuristic is used.
-The sampler reads screen pixels around the fly and reduces them to a 1-D angular
-luminance panorama. That panorama is interpolated onto MaleCNS photoreceptors by
-the neural layer.
+The brain-facing panorama remains one-dimensional for MaleCNS compatibility,
+while a small multi-row facet field is retained for motion coherence.
 """
 from __future__ import annotations
 
@@ -11,23 +9,25 @@ import math
 
 import numpy as np
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint
 from PySide6.QtGui import QGuiApplication, QImage, qGray
 
 from .sensory import DesktopMotionModel, SensoryDynamics
 
 
 class DesktopRetinaSampler:
-    """Sample the screen around the fly as raw luminance rays."""
+    """Sample local desktop luminance through a compact compound-eye field."""
 
     def __init__(
         self,
         *,
         bins: int = 384,
         radii: tuple[int, ...] = (42, 72, 110, 165, 240, 340),
+        facet_offsets: tuple[int, ...] = (-9, 0, 9),
     ) -> None:
         self.bins = int(bins)
         self.radii = tuple(int(r) for r in radii)
+        self.facet_offsets = tuple(int(v) for v in facet_offsets)
         self.azimuth = np.linspace(
             -1.0,
             1.0,
@@ -38,6 +38,15 @@ class DesktopRetinaSampler:
         self.motion = DesktopMotionModel(cursor_radius=14.0)
         self._last_radial_luminance = np.full(
             (len(self.radii), self.bins),
+            0.9,
+            dtype=np.float32,
+        )
+        self._last_compound_luminance = np.full(
+            (
+                len(self.facet_offsets),
+                len(self.radii),
+                self.bins,
+            ),
             0.9,
             dtype=np.float32,
         )
@@ -58,18 +67,21 @@ class DesktopRetinaSampler:
         cursor: QPoint | None = None,
         food: tuple[float, float, float] | None = None,
     ) -> np.ndarray:
-        """Return luminance in [0, 1] for angular bins around the fly.
-
-        Multiple radii are averaged along each ray. This is an optical
-        downsampling step only; it does not identify shapes or objects.
-        """
+        """Return brain-facing luminance in [0, 1] for angular bins."""
         origin = QPoint(int(round(x)), int(round(y)))
         screen = self._screen_at(origin)
         if screen is None:
-            self._last_radial_luminance = np.full(
-                (len(self.radii), self.bins),
+            self._last_compound_luminance = np.full(
+                (
+                    len(self.facet_offsets),
+                    len(self.radii),
+                    self.bins,
+                ),
                 0.9,
                 dtype=np.float32,
+            )
+            self._last_radial_luminance = self._last_compound_luminance.mean(
+                axis=0
             )
             return np.full(
                 self.bins,
@@ -81,10 +93,9 @@ class DesktopRetinaSampler:
         local_x = x - geom.left()
         local_y = y - geom.top()
 
-        # Capture only the retinal neighbourhood instead of the full desktop.
-        # At 50 Hz a full-screen copy is unnecessarily expensive; the retina
-        # never samples beyond max(self.radii).
-        pad = max(self.radii) + 4
+        pad = max(self.radii) + max(
+            abs(v) for v in self.facet_offsets
+        ) + 5
         capture_left = max(0, int(math.floor(local_x - pad)))
         capture_top = max(0, int(math.floor(local_y - pad)))
         capture_right = min(
@@ -111,12 +122,12 @@ class DesktopRetinaSampler:
         sample_x = local_x - capture_left
         sample_y = local_y - capture_top
 
-        values = np.empty(
-            self.bins,
-            dtype=np.float32,
-        )
-        radial_values = np.full(
-            (len(self.radii), self.bins),
+        compound = np.full(
+            (
+                len(self.facet_offsets),
+                len(self.radii),
+                self.bins,
+            ),
             0.9,
             dtype=np.float32,
         )
@@ -125,26 +136,27 @@ class DesktopRetinaSampler:
             angle = heading + float(az) * math.pi
             cs = math.cos(angle)
             sn = math.sin(angle)
-            total = 0.0
-            count = 0
+            # Perpendicular offset creates a narrow multi-row receptive field
+            # around each ray rather than collapsing all local spatial detail.
+            px_axis = -sn
+            py_axis = cs
 
-            for radius_index, radius in enumerate(self.radii):
-                px = int(round(sample_x + cs * radius))
-                py = int(round(sample_y + sn * radius))
-                if (
-                    0 <= px < image.width()
-                    and 0 <= py < image.height()
-                ):
-                    sample_luminance = qGray(image.pixel(px, py)) / 255.0
-                    radial_values[radius_index, i] = sample_luminance
-                    total += sample_luminance
-                    count += 1
+            for row, offset in enumerate(self.facet_offsets):
+                ox = px_axis * offset
+                oy = py_axis * offset
+                for radius_index, radius in enumerate(self.radii):
+                    px = int(round(sample_x + cs * radius + ox))
+                    py = int(round(sample_y + sn * radius + oy))
+                    if (
+                        0 <= px < image.width()
+                        and 0 <= py < image.height()
+                    ):
+                        compound[row, radius_index, i] = (
+                            qGray(image.pixel(px, py)) / 255.0
+                        )
 
-            values[i] = (
-                total / count
-                if count
-                else 0.9
-            )
+        radial_values = compound.mean(axis=0)
+        values = radial_values.mean(axis=0)
 
         def overlay_object(
             ox: float,
@@ -181,9 +193,13 @@ class DesktopRetinaSampler:
                 radial_values[:, mask],
                 np.float32(luminance),
             )
+            compound[:, :, mask] = np.minimum(
+                compound[:, :, mask],
+                np.float32(luminance),
+            )
 
-        # Windows screen capture normally omits the hardware cursor. Add its
-        # retinal silhouette as a sensory image, not as a behaviour command.
+        # The OS often omits the hardware cursor from screen capture. Its dark
+        # retinal silhouette is inserted as optics only, never as an action.
         if cursor is not None:
             overlay_object(
                 float(cursor.x()),
@@ -192,9 +208,6 @@ class DesktopRetinaSampler:
                 0.07,
             )
 
-        # Flybit's sugar drop is another world object. We explicitly render its
-        # retinal silhouette so visibility does not depend on whether the OS
-        # includes our transparent overlay window in screen capture.
         if food is not None:
             fx, fy, fr = food
             overlay_object(
@@ -204,17 +217,22 @@ class DesktopRetinaSampler:
                 0.38,
             )
 
+        self._last_compound_luminance = np.clip(
+            compound,
+            0.0,
+            1.0,
+        ).astype(np.float32)
         self._last_radial_luminance = np.clip(
             radial_values,
             0.0,
             1.0,
         ).astype(np.float32)
+
         return np.clip(
             values,
             0.0,
             1.0,
         ).astype(np.float32)
-
 
     def sample_with_dynamics(
         self,
@@ -226,7 +244,6 @@ class DesktopRetinaSampler:
         food: tuple[float, float, float] | None = None,
         timestamp: float | None = None,
     ) -> tuple[np.ndarray, SensoryDynamics | None]:
-        """Capture retina and temporal motion cues from the same observation."""
         luminance = self.sample(
             x=x,
             y=y,
@@ -244,6 +261,7 @@ class DesktopRetinaSampler:
             cursor_y=float(cursor.y()),
             luminance=luminance,
             radial_luminance=self._last_radial_luminance,
+            compound_luminance=self._last_compound_luminance,
             timestamp=timestamp,
         )
         return luminance, dynamics
