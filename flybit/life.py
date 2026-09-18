@@ -57,6 +57,21 @@ class LifeModel:
         self._energy = max(0.0, min(1.0, self._energy - drain + recovery))
         self.state.energy = self._energy
 
+    def elapse(self, seconds: float, *, hunger: float) -> None:
+        """Advance low-activity metabolism while the desktop app was closed."""
+        seconds = max(0.0, float(seconds))
+        if seconds <= 0.0:
+            return
+        h = max(0.0, min(1.0, float(hunger)))
+        # Offline metabolism is deliberately lower than active runtime drain.
+        drain = seconds * (0.0000035 + 0.0000085 * h)
+        recovery = seconds * 0.0000030 * (1.0 - h)
+        self._energy = max(
+            0.0,
+            min(1.0, self._energy - drain + recovery),
+        )
+        self.state.energy = self._energy
+
     def feed(self, amount: float = 1.0) -> None:
         self._energy = min(1.0, self._energy + 0.20 * max(0.1, float(amount)))
         self.state.energy = self._energy
