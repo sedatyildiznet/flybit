@@ -123,14 +123,17 @@ class SixLegGait:
             for name in LEG_NAMES:
                 rx, ry = self._ROOTS[name]
                 fx, fy = self._REST_FEET[name]
-                tuck = 1.0 - 0.74 * extension
+                # In free flight the legs stay compact. As landing drive
+                # rises, all six legs extend toward their grounded contact
+                # geometry so visual pose and physical landing state agree.
+                reach = 0.26 + 0.74 * extension
                 legs.append(
                     LegPose(
                         name=name,
                         root_x=rx,
                         root_y=ry,
-                        foot_x=rx + (fx - rx) * tuck,
-                        foot_y=ry + (fy - ry) * tuck,
+                        foot_x=rx + (fx - rx) * reach,
+                        foot_y=ry + (fy - ry) * reach,
                         lift=1.0 - extension,
                         stance=False,
                     )
