@@ -1,17 +1,25 @@
-"""2.5-D desktop body bridge driven only by MaleCNS motor read-outs.
-
-Screen x/y remain a flat desktop locomotion plane. A separate virtual altitude
-axis models take-off, sustained flight and landing, so gravity never pulls the
-organism toward the bottom of the monitor. Identified descending neurons provide
-locomotor/steering/escape drive; the body decoder translates those outputs into
-planar velocity plus vertical flight dynamics.
-"""
+"""2.5-D desktop body bridge with explicit six-leg support and flight phases."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 import math
 
+from .gait import GaitSnapshot, LegPose, SixLegGait
+from .phenotype import IndividualPhenotype
 from .world import Surface, support_at
+
+
+_NEUTRAL_PHENOTYPE = IndividualPhenotype(
+    stride_scale=1.0,
+    turn_bias=0.0,
+    pause_scale=1.0,
+    grooming_bias=1.0,
+    startle_bias=0.0,
+    flight_saccade_scale=1.0,
+    micro_activity=1.0,
+    body_scale=1.0,
+    handedness=0.0,
+)
 
 
 @dataclass(frozen=True)
@@ -76,44 +84,51 @@ class BiomechanicsSnapshot:
     acceleration: float
     turn_rate: float
     gait_phase: float
+    stride_hz: float
+    stance_count: int
+    tripod_coherence: float
     wingbeat_hz: float
     locomotor_load: float
     altitude: float
     vertical_speed: float
+    leg_extension: float
+    body_bob: float
+    takeoff_preload: float
+    landing_drive: float
     support_title: str
+    legs: tuple[LegPose, ...]
 
 
 class FlyKinematics:
-    """Planar desktop body with an independent virtual altitude axis.
-
-    Neural mapping:
-      DNg100 -> forward locomotor drive
-      DNa02  -> steering differential
-      DNp01  -> escape/flight burst
-      MDN    -> backward locomotor drive
-      DNg02  -> flight thrust / wing-power drive
-
-    No semantic window label chooses behaviour. Visible native-window geometry
-    is used only to identify the substrate under a grounded body. Screen x/y
-    remain one locomotion plane and virtual altitude remains independent.
-    """
+    """Desktop-plane body with a separate virtual altitude axis."""
 
     BODY_HALF_HEIGHT = 9.0
     BODY_HALF_WIDTH = 12.0
+    TAKEOFF_PRELOAD_SECONDS = 0.045
 
-    def __init__(self, state: FlyBodyState) -> None:
+    def __init__(
+        self,
+        state: FlyBodyState,
+        *,
+        phenotype: IndividualPhenotype | None = None,
+    ) -> None:
         self.state = state
+        self.phenotype = phenotype or _NEUTRAL_PHENOTYPE
         self._forward = 0.0
         self._backward = 0.0
         self._steer = 0.0
         self._escape = 0.0
         self._escape_bias = 0.0
         self._escape_prev = 0.0
-        self._gait_phase = 0.0
         self._wingbeat_hz = 0.0
         self._last_speed = math.hypot(state.vx, state.vy)
         self._acceleration = 0.0
         self._locomotor_load = 0.0
+        self._takeoff_countdown = 0.0
+        self._takeoff_pending = False
+        self._landing_drive = 0.0
+        self._gait = SixLegGait(stride_scale=self.phenotype.stride_scale)
+        self._gait_snapshot = self._gait.snapshot
 
     @staticmethod
     def _lowpass(
@@ -129,6 +144,32 @@ class FlyKinematics:
     def _wrap_angle(value: float) -> float:
         return (value + math.pi) % (2.0 * math.pi) - math.pi
 
+    def _begin_airborne_escape(self, events: list[MotionEvent]) -> None:
+        s = self.state
+        s.heading = self._wrap_angle(
+            s.heading + self._escape_bias * 0.72
+        )
+        s.airborne = True
+        s.support_id = None
+        s.support_title = "Air"
+        s.flight_energy = max(
+            s.flight_energy,
+            0.55 + self._escape * 0.75,
+        )
+        s.vertical_velocity = max(
+            s.vertical_velocity,
+            95.0 + 85.0 * self._escape,
+        )
+        s.altitude = max(s.altitude, 0.5)
+        self._takeoff_pending = False
+        self._takeoff_countdown = 0.0
+        events.append(
+            MotionEvent(
+                "takeoff",
+                "leg preload -> jump -> wing-powered escape",
+            )
+        )
+
     def update(
         self,
         motor: MotorActivity,
@@ -136,9 +177,16 @@ class FlyKinematics:
         bounds: tuple[float, float, float, float],
         dt: float = 0.020,
         physiology_gain: float = 1.0,
+        *,
+        landing_drive: float = 0.0,
+        groom_target: str = "",
+        micro_action: str = "",
     ) -> list[MotionEvent]:
         events: list[MotionEvent] = []
         s = self.state
+        dt = max(0.001, min(0.20, float(dt)))
+        physiology_gain = max(0.05, min(1.25, float(physiology_gain)))
+        self._landing_drive = max(0.0, min(1.0, float(landing_drive)))
 
         self._forward = self._lowpass(
             self._forward,
@@ -171,20 +219,14 @@ class FlyKinematics:
             0.035,
         )
 
-        # Steering is a yaw-only decoder on the screen plane. It cannot roll or
-        # pitch the rendered body, so the fly no longer appears to somersault.
-        # Side-specific escape output is retained as a fast evasive yaw bias.
-        # This fixes the old behaviour where left/right DNp01 information was
-        # collapsed to max() and the body simply accelerated along its current
-        # heading like a wheeled robot.
         normal_turn_rate = max(
             -2.8,
             min(2.8, self._steer * 5.0),
         )
         target_turn_rate = max(
-            -4.2,
+            -4.5,
             min(
-                4.2,
+                4.5,
                 normal_turn_rate + self._escape_bias * 4.6,
             ),
         )
@@ -198,36 +240,43 @@ class FlyKinematics:
             s.heading + s.angular_velocity * dt
         )
 
-        # A rising DNp01 response starts a true take-off on a separate virtual
-        # altitude axis. This avoids the old mistake of treating screen Y as
-        # physical height while still giving flight a real airborne state.
+        # Grounded escape begins with a short leg-compression phase before the
+        # body becomes airborne. This preserves low latency while avoiding an
+        # instantaneous teleport from walking to flight.
         if (
-            self._escape > 0.06
+            not s.airborne
+            and not self._takeoff_pending
+            and self._escape > 0.06
             and self._escape_prev <= 0.06
         ):
-            s.heading = self._wrap_angle(
-                s.heading + self._escape_bias * 0.72
-            )
-            s.airborne = True
-            s.support_id = None
-            s.support_title = "Air"
-            s.flight_energy = max(
-                s.flight_energy,
-                0.55 + self._escape * 0.75,
-            )
-            s.vertical_velocity = max(
-                s.vertical_velocity,
-                95.0 + 85.0 * self._escape,
-            )
-            s.altitude = max(s.altitude, 0.5)
+            self._takeoff_pending = True
+            self._takeoff_countdown = self.TAKEOFF_PRELOAD_SECONDS
             events.append(
                 MotionEvent(
-                    "takeoff",
-                    "directional escape/take-off motor program",
+                    "takeoff_prepare",
+                    "middle/hind leg preload",
                 )
             )
 
         self._escape_prev = self._escape
+
+        if self._takeoff_pending and not s.airborne:
+            self._takeoff_countdown -= dt
+            if self._takeoff_countdown <= 0.0:
+                self._begin_airborne_escape(events)
+
+        takeoff_preload = (
+            max(
+                0.0,
+                min(
+                    1.0,
+                    self._takeoff_countdown
+                    / self.TAKEOFF_PRELOAD_SECONDS,
+                ),
+            )
+            if self._takeoff_pending
+            else 0.0
+        )
 
         if motor.flight > 0.04 and s.airborne:
             s.flight_energy = max(
@@ -236,12 +285,11 @@ class FlyKinematics:
             )
 
         if s.flight_energy > 0.0:
+            burn = 1.0 + 0.55 * self._landing_drive
             s.flight_energy = max(
                 0.0,
-                s.flight_energy - dt,
+                s.flight_energy - dt * burn,
             )
-
-        physiology_gain = max(0.05, min(1.25, float(physiology_gain)))
 
         if s.airborne:
             gravity = 180.0
@@ -249,8 +297,15 @@ class FlyKinematics:
                 motor.flight * 230.0
                 + self._escape * 300.0
             ) * physiology_gain
-            s.vertical_velocity += (lift - gravity) * dt
-            s.vertical_velocity *= math.exp(-1.35 * dt)
+            lift *= 1.0 - 0.82 * self._landing_drive
+            descent = 145.0 * self._landing_drive
+
+            s.vertical_velocity += (
+                lift - gravity - descent
+            ) * dt
+            s.vertical_velocity *= math.exp(
+                -(1.35 + 0.55 * self._landing_drive) * dt
+            )
             s.altitude += s.vertical_velocity * dt
 
             if s.altitude >= 110.0:
@@ -259,16 +314,21 @@ class FlyKinematics:
 
             if s.altitude <= 0.0:
                 s.altitude = 0.0
-                if (
-                    self._escape < 0.025
-                    and motor.flight < 0.04
-                ):
+                can_land = (
+                    self._landing_drive > 0.18
+                    or (
+                        self._escape < 0.025
+                        and motor.flight < 0.04
+                    )
+                )
+                if can_land:
                     s.airborne = False
                     s.vertical_velocity = 0.0
+                    s.flight_energy = 0.0
                     events.append(
                         MotionEvent(
                             "land",
-                            "virtual altitude reached desktop plane",
+                            "leg extension -> six-point substrate contact",
                         )
                     )
                 else:
@@ -281,17 +341,30 @@ class FlyKinematics:
             s.altitude = 0.0
             s.vertical_velocity = 0.0
 
-
         walk_drive = (self._forward - self._backward) * physiology_gain
+        planned_ground_norm = min(1.0, abs(walk_drive))
+        self._gait_snapshot = self._gait.update(
+            dt,
+            speed_norm=planned_ground_norm,
+            turn_rate=s.angular_velocity,
+            airborne=s.airborne,
+            landing_drive=self._landing_drive,
+            takeoff_preload=takeoff_preload,
+            groom_target=groom_target,
+            micro_action=micro_action,
+        )
+
         if s.airborne:
             speed_target = (
                 walk_drive * 180.0
                 + motor.flight * 360.0 * physiology_gain
                 + self._escape * 760.0 * physiology_gain
             )
+            speed_target *= 1.0 - 0.42 * self._landing_drive
             response_tau = 0.055
         else:
-            speed_target = walk_drive * 155.0
+            contact_gain = self._gait_snapshot.support_factor
+            speed_target = walk_drive * 155.0 * contact_gain
             response_tau = 0.10
 
         desired_vx = math.cos(s.heading) * speed_target
@@ -310,7 +383,6 @@ class FlyKinematics:
             response_tau,
         )
 
-        # Passive planar drag prevents endless drifting after neural drive ends.
         drag = math.exp(
             -(2.2 if s.airborne else 4.0) * dt
         )
@@ -321,21 +393,25 @@ class FlyKinematics:
         s.y += s.vy * dt
 
         speed = math.hypot(s.vx, s.vy)
-        self._acceleration = (speed - self._last_speed) / max(dt, 1e-6)
+        self._acceleration = (
+            speed - self._last_speed
+        ) / max(dt, 1e-6)
         self._last_speed = speed
         self._locomotor_load = max(
             0.0,
-            min(1.0, speed / (520.0 if s.airborne else 170.0)),
+            min(
+                1.0,
+                speed / (520.0 if s.airborne else 170.0),
+            ),
         )
+
         if s.airborne:
-            self._wingbeat_hz = 120.0 + 80.0 * max(
-                motor.flight, self._escape
+            self._wingbeat_hz = 172.0 + 52.0 * max(
+                motor.flight,
+                self._escape,
             )
         else:
             self._wingbeat_hz = 0.0
-            self._gait_phase = (
-                self._gait_phase + dt * (1.5 + 8.5 * self._locomotor_load)
-            ) % 1.0
 
         left, top, right, bottom = bounds
         min_x = left + self.BODY_HALF_WIDTH
@@ -343,10 +419,6 @@ class FlyKinematics:
         min_y = top + self.BODY_HALF_HEIGHT
         max_y = bottom - self.BODY_HALF_HEIGHT
 
-        # Screen edges are physical containment. If the body crosses a wall,
-        # reflect only the wall-normal heading component once. This prevents a
-        # fly from remaining pinned against a corner while avoiding the old
-        # repeated bounce/spin loop.
         hit_left = s.x < min_x
         hit_right = s.x > max_x
         hit_top = s.y < min_y
@@ -389,8 +461,6 @@ class FlyKinematics:
         if hit_left or hit_right or hit_top or hit_bottom:
             s.angular_velocity *= 0.25
 
-        # Resolve physical contact after planar movement. Window identity is
-        # contact telemetry only; it never changes velocity, heading or choice.
         if s.airborne and s.altitude > 0.5:
             next_support_id = None
             next_support_title = "Air"
@@ -398,7 +468,7 @@ class FlyKinematics:
             support = support_at(surfaces, s.x, s.y)
             next_support_id = support.id if support is not None else 0
             next_support_title = (
-                (support.title or "Window")
+                (support.title or support.kind.title())
                 if support is not None
                 else "Desktop"
             )
@@ -420,17 +490,35 @@ class FlyKinematics:
 
         return events
 
-
     def biomechanics(self) -> BiomechanicsSnapshot:
-        """Current body telemetry derived from the physical state."""
+        gait: GaitSnapshot = self._gait_snapshot
         return BiomechanicsSnapshot(
             speed=float(self._last_speed),
             acceleration=float(self._acceleration),
             turn_rate=float(self.state.angular_velocity),
-            gait_phase=float(self._gait_phase),
+            gait_phase=float(gait.phase),
+            stride_hz=float(gait.stride_hz),
+            stance_count=int(gait.stance_count),
+            tripod_coherence=float(gait.tripod_coherence),
             wingbeat_hz=float(self._wingbeat_hz),
             locomotor_load=float(self._locomotor_load),
             altitude=float(self.state.altitude),
             vertical_speed=float(self.state.vertical_velocity),
+            leg_extension=float(gait.leg_extension),
+            body_bob=float(gait.body_bob),
+            takeoff_preload=float(
+                max(
+                    0.0,
+                    min(
+                        1.0,
+                        self._takeoff_countdown
+                        / self.TAKEOFF_PRELOAD_SECONDS,
+                    ),
+                )
+                if self._takeoff_pending
+                else 0.0
+            ),
+            landing_drive=float(self._landing_drive),
             support_title=str(self.state.support_title),
+            legs=tuple(gait.legs),
         )
