@@ -11,6 +11,16 @@ from flybit.world import Surface
 
 
 class MotionBridgeTest(unittest.TestCase):
+    def test_bilateral_wings_and_optic_flow_stabilization(self):
+        body = FlyBodyState(x=200, y=200, airborne=True, altitude=40, flight_energy=1)
+        model = FlyKinematics(body)
+        for _ in range(20):
+            model.update(MotorActivity(flight_left=.2, flight_right=.9), [],
+                         (0, 0, 800, 600), dt=.02, optic_flow=.7)
+        bio = model.biomechanics()
+        self.assertGreater(bio.right_wing_drive, bio.left_wing_drive)
+        self.assertNotEqual(bio.roll_rate, 0)
+        self.assertNotEqual(bio.yaw_rate, 0)
     def test_forward_dn_moves_on_flat_plane(self):
         body = FlyBodyState(
             x=200.0,

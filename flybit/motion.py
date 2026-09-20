@@ -199,6 +199,7 @@ class FlyKinematics:
         landing_drive: float = 0.0,
         groom_target: str = "",
         micro_action: str = "",
+        optic_flow: float = 0.0,
     ) -> list[MotionEvent]:
         events: list[MotionEvent] = []
         s = self.state
@@ -316,8 +317,9 @@ class FlyKinematics:
             wing_difference = s.right_wing_drive - s.left_wing_drive
             # Bilateral sum provides lift/thrust; difference produces roll and
             # yaw.  These are modeled body dynamics, not MaleCNS measurements.
-            s.roll_rate += (wing_difference * 22.0 - s.roll_rate * 5.5) * dt
-            s.yaw_rate += (wing_difference * 13.0 - s.yaw_rate * 4.2) * dt
+            flow = max(-2.0, min(2.0, float(optic_flow)))
+            s.roll_rate += (wing_difference * 22.0 - s.roll_rate * 5.5 - flow * 2.4) * dt
+            s.yaw_rate += (wing_difference * 13.0 - s.yaw_rate * 4.2 - flow * 1.8) * dt
             pitch_target = max(-0.32, min(0.35, 0.12 - 0.28 * self._landing_drive))
             s.pitch_rate += ((pitch_target - s.pitch) * 12.0 - s.pitch_rate * 5.0) * dt
             s.roll = max(-0.75, min(0.75, s.roll + s.roll_rate * dt))

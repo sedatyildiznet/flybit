@@ -75,7 +75,8 @@ class FlybitSimulation:
         events = self.kinematics.update(ethology.motor if life.alive else MotorActivity(),
             surfaces, bounds, dt=dt, physiology_gain=life.vitality,
             landing_drive=ethology.landing_drive, groom_target=ethology.groom_target,
-            micro_action=ethology.micro_action)
+            micro_action=ethology.micro_action,
+            optic_flow=float(getattr(sensory, "optic_flow", 0.0)))
         latency = max(0.0, now - self._neural.timestamp)
         return SimulationSnapshot(now, self.step_count, body, ethology,
             self.kinematics.biomechanics(), circadian, tuple(events),

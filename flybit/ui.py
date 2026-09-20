@@ -1680,6 +1680,7 @@ class FlybitWindow(QObject):
             landing_drive=ethology.landing_drive,
             groom_target=ethology.groom_target,
             micro_action=ethology.micro_action,
+            optic_flow=float(getattr(self.latest_sensory, "optic_flow", 0.0)),
         )
 
         for event in events:
