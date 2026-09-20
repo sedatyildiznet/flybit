@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flybrain"
-version = "0.4.0"
+version = "0.5.0"
 description = "MaleCNS connectome neural core with the Flybit desktop organism."
 readme = "README.md"
 license = "MIT"

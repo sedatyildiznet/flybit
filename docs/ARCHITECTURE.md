@@ -30,15 +30,50 @@ The intended closed loop is now:
 ```
 world
   -> sensory transduction
-  -> MaleCNS neural dynamics
-  -> descending output
+  -> MaleCNS / modeled sensory processing
+  -> physiology + bounded sensory-context memory
   -> modeled ethology / VNC bridge
-  -> body physics
+  -> motor -> body physics + six-leg proprioception
   -> world
 ```
 
 Measured biology, modeled transduction/ethology and synthetic desktop-world
 signals must remain explicitly separated in code and UI.
+
+## v0.5 physical feedback and learning
+
+- `simulation.py` owns the UI-independent ordered tick and returns a timestamped
+  `SimulationSnapshot`; asynchronous neural outputs also carry monotonic step
+  and timestamp data, with stale-latency telemetry.
+- `proprioception.py` computes contact, touchdown, liftoff, load, slip, support
+  identity and edge distance for all six legs. Landing completes only after a
+  stable multi-leg contact; unstable contact produces abort/recovery events.
+- `memory.py` stores at most 128 retinal/odor/geometry associations in a
+  separately versioned atomic JSON file. Context similarity, decay and an
+  eligibility trace produce small ethology biases, never motor commands.
+- `compound_eye.py` maintains separate left/right fields across elevation bands
+  and estimates horizontal/vertical flow, expansion, rotation and radial
+  coherence while preserving the one-dimensional MaleCNS panorama.
+- `world.py` exposes edge segments, corners, overlap depth, z-order and support
+  continuity through `query_local_geometry`; titles are absent from this API.
+- `sleep.py` represents long episodes with drowsy, light, deep and micro-awake
+  stages and stage-specific noise, leakage and responsiveness gains.
+- `assays.py` runs deterministic baseline, looming, food, edge, flight/landing,
+  sleep/startle and learning scenarios and emits bounded JSON metrics.
+
+### Evidence boundary
+
+**MEASURED / DATA-DRIVEN:** MaleCNS neuron identities, connection direction and
+weights, transmitter-derived signs and mapped photoreceptor identities.
+
+**MODELED:** graded transfer dynamics, looming/motion transduction, ethology,
+VNC decoding, learning, proprioception, gait, wing/body physics and sleep.
+These are computational approximations and are not claimed as measured MaleCNS
+biology.
+
+**SYNTHETIC:** desktop surfaces and edges, virtual altitude, sugar/odor field,
+care state and diagnostic/semantic telemetry. Semantic labels never enter the
+behavioral control loop.
 
 ## Neural foundation
 

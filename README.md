@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/sedatyildiznet/flybit/releases/tag/v0.4.0"><img alt="Release" src="https://img.shields.io/badge/release-v0.4.0-2ea44f"></a>
+  <a href="https://github.com/sedatyildiznet/flybit/releases/tag/v0.5.0"><img alt="Release" src="https://img.shields.io/badge/release-v0.5.0-2ea44f"></a>
   <img alt="Status" src="https://img.shields.io/badge/status-stable-2ea44f">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows-0078D4">
   <img alt="Python" src="https://img.shields.io/badge/python-3.10%2B-3776AB">
@@ -55,7 +55,21 @@ Mouse approach, light, movement, hunger, fatigue and other state changes must in
 
 ---
 
-## v0.4.0 Physical Fly
+## v0.5.0 Closed-loop Organism
+
+**v0.5.0 strengthens physical feedback and long-running behavioral fidelity.**
+
+It adds six-leg proprioceptive contact and stable landing verification,
+calibratable semi-Markov ethology, bounded sensory-context learning, bilateral
+wing attitude dynamics, a bilateral multi-elevation compound-eye model, local
+desktop geometry, staged long sleep, sensory-driven micro-behavior, a headless
+simulation controller and deterministic behavioral assays. Learning supplies
+only bounded attention/activation biases; it never calls movement actions.
+
+`ui.py` is now a small public facade. Rendering, control-panel, worker and
+desktop-controller responsibilities live in focused modules.
+
+### v0.4.0 Physical Fly
 
 **v0.4.0 is the physical-behaviour update.**
 
@@ -89,7 +103,7 @@ VNC, body and desktop physics layers remain explicitly modeled.
 
 Latest stable release:
 
-**[Download Flybit v0.4.0](https://github.com/sedatyildiznet/flybit/releases/tag/v0.4.0)**
+**[Download Flybit v0.5.0](https://github.com/sedatyildiznet/flybit/releases/tag/v0.5.0)**
 
 ---
 
@@ -708,7 +722,7 @@ Flybit does not currently claim:
 
 Use the latest stable release:
 
-**[Flybit v0.3.0](https://github.com/sedatyildiznet/flybit/releases/tag/v0.4.0)**
+**[Flybit v0.5.0](https://github.com/sedatyildiznet/flybit/releases/tag/v0.5.0)**
 
 The Windows package is produced by GitHub Actions as:
 
