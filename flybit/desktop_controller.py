@@ -64,6 +64,9 @@ from .state import (
 )
 from .vision import DesktopRetinaSampler
 from .world import WindowSurfaceScanner, boundary_cue
+from .simulation import FlybitSimulation
+from .controller import TimedNeuralOutput
+from .state import state_dir
 
 
 from .workers import BrainWorker
@@ -157,6 +160,21 @@ class FlybitWindow(QObject):
             ),
             phenotype=self.phenotype,
         )
+        self.simulation = FlybitSimulation(
+            self.state,
+            self.kinematics.state,
+            seed=seed_from_identity(self.state.created_at),
+            memory_path=state_dir() / "memory.json",
+        )
+        # The Qt layer renders and reports these models; ordered updates are
+        # owned by FlybitSimulation.
+        self.care = self.simulation.care
+        self.life = self.simulation.life
+        self.circadian = self.simulation.circadian
+        self.arousal = self.simulation.arousal
+        self.ethology = self.simulation.ethology
+        self.kinematics = self.simulation.kinematics
+        self.olfaction = self.simulation.olfaction
         self.latest_neural_motor = MotorActivity()
         self.latest_motor = MotorActivity()
         self.latest_snapshot: NeuralSnapshot | None = None
@@ -274,66 +292,15 @@ class FlybitWindow(QObject):
         # One world clock: sample the scene immediately before physiology,
         # ethology and body integration.
         self._capture_scene()
-        self.care.tick(dt)
-        life = self.life.snapshot()
-        motor_load = self.kinematics.biomechanics().locomotor_load
-        self.life.tick(
-            dt,
-            motor_load=motor_load,
-            hunger=self.state.hunger,
-        )
-        life = self.life.snapshot()
-        ambient = (
-            self.latest_sensory.ambient_luminance
-            if self.latest_sensory is not None
-            else 0.5
-        )
-        self.circadian.tick(
-            dt,
-            motor_load=motor_load,
-            ambient_luminance=ambient,
-        )
-        circadian = self.circadian.snapshot()
-
-        sensory_threat = 0.0
-        if self.latest_sensory is not None:
-            sensory_threat = max(
-                self.latest_sensory.retinal_loom_left,
-                self.latest_sensory.retinal_loom_right,
-                0.45 * self.latest_sensory.mechanosensory_disturbance,
-            )
-        self.arousal.tick(
-            dt,
-            escape_drive=self.latest_neural_motor.escape,
-            sensory_threat=sensory_threat,
-        )
-        arousal = self.arousal.snapshot()
-
-        odor = self._sample_odor()
         bounds = self._desktop_bounds()
-        body_before = self.kinematics.state
-        edge = boundary_cue(
-            self.surfaces,
-            body_before.x,
-            body_before.y,
-            body_before.heading,
-            bounds,
+        snap = self.simulation.tick(
+            dt, sensory=self.latest_sensory, surfaces=self.surfaces,
+            bounds=bounds, timestamp=now,
         )
-        ethology = self.ethology.tick(
-            dt,
-            neural=self.latest_neural_motor if life.alive else MotorActivity(),
-            sensory=self.latest_sensory,
-            odor=odor,
-            boundary=edge,
-            heading=body_before.heading,
-            hunger_drive=self.care.homeostatic_drive,
-            rest_drive=circadian.rest_drive,
-            activity=life.activity,
-            boldness=life.boldness,
-            curiosity=life.curiosity,
-            threat_arousal=arousal.threat_arousal,
-            airborne=body_before.airborne,
-        )
+        life = self.life.snapshot()
+        circadian = snap.circadian
+        arousal = self.arousal.snapshot()
+        ethology = snap.ethology
         self.latest_ethology = ethology
         self.latest_motor = ethology.motor if life.alive else MotorActivity()
         self.state.grooming_need = ethology.grooming_need
@@ -348,20 +315,7 @@ class FlybitWindow(QObject):
             circadian.rest_drive,
             arousal.threat_arousal,
         )
-        physiology_gain = life.vitality * (0.78 + 0.30 * life.activity)
-        if not life.alive:
-            physiology_gain = 0.0
-        events = self.kinematics.update(
-            self.latest_motor,
-            self.surfaces,
-            bounds,
-            dt=dt,
-            physiology_gain=physiology_gain,
-            landing_drive=ethology.landing_drive,
-            groom_target=ethology.groom_target,
-            micro_action=ethology.micro_action,
-            optic_flow=float(getattr(self.latest_sensory, "optic_flow", 0.0)),
-        )
+        events = snap.events
 
         for event in events:
             if event.kind == "land":
@@ -380,6 +334,12 @@ class FlybitWindow(QObject):
                 self.panel.append_log(
                     f"substrate contact · {event.detail}"
                 )
+            elif event.kind == "food_contact":
+                self.food_overlay.hide()
+                self.panel.append_log(
+                    "sugar contact → feeding bout · nutrition state updated"
+                )
+                save_state(self.state)
 
         body = self.kinematics.state
         bio = self.kinematics.biomechanics()
@@ -555,6 +515,9 @@ class FlybitWindow(QObject):
     def _on_snapshot(self, snap: NeuralSnapshot) -> None:
         self.latest_snapshot = snap
         self.latest_neural_motor = snap.motor
+        self.simulation.set_neural_output(
+            TimedNeuralOutput(snap.motor, time.monotonic(), self.simulation.step_count)
+        )
 
         if self.panel.isVisible():
             self.panel.update_snapshot(
@@ -681,4 +644,3 @@ class FlybitWindow(QObject):
         if self._brain_thread.isRunning():
             self._brain_thread.quit()
             self._brain_thread.wait(2500)
-

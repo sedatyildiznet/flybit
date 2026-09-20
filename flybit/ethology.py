@@ -242,7 +242,8 @@ class EthologyModel:
         """Choose among competing drives using noisy activation, not hard order."""
         groom = self.grooming_need * self.phenotype.grooming_bias
         scores = {
-            "sleep": 0.10 + 1.65 * rest - 0.45 * food_drive,
+            "sleep": 0.10 + 1.65 * rest - 0.45 * food_drive
+            + 2.00 * max(0.0, (rest - 0.55) / 0.45),
             "forage": 0.06 + 1.25 * food_drive + 0.45 * hunger,
             "groom": 0.18 + 1.25 * groom,
             "boundary": 0.12 + 1.10 * boundary_drive,
@@ -552,7 +553,14 @@ class EthologyModel:
                             boundary_drive=boundary_drive,
                         )
             elif self.mode == "boundary" and boundary_drive < 0.08:
-                self.bout_remaining = 0.0
+                self._choose_ground_mode(
+                    hunger=hunger,
+                    food_drive=food_drive,
+                    rest=rest,
+                    activity=activity,
+                    curiosity=curiosity,
+                    boundary_drive=boundary_drive,
+                )
             elif self.bout_remaining <= 0.0:
                 self._choose_ground_mode(
                     hunger=hunger,
