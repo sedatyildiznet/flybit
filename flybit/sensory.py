@@ -35,6 +35,10 @@ class SensoryDynamics:
     retinal_loom_left: float
     retinal_loom_right: float
     loom_habituation: float
+    vertical_optic_flow: float = 0.0
+    optic_expansion: float = 0.0
+    optic_rotation: float = 0.0
+    radial_coherence: float = 0.0
 
 
 class DesktopMotionModel:

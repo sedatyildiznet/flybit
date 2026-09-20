@@ -5,6 +5,7 @@ while a small multi-row facet field is retained for motion coherence.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import math
 
 import numpy as np
@@ -13,6 +14,7 @@ from PySide6.QtCore import QPoint
 from PySide6.QtGui import QGuiApplication, QImage, qGray
 
 from .sensory import DesktopMotionModel, SensoryDynamics
+from .compound_eye import CompoundEyeModel, MotionField
 
 
 class DesktopRetinaSampler:
@@ -36,6 +38,8 @@ class DesktopRetinaSampler:
             dtype=np.float32,
         )
         self.motion = DesktopMotionModel(cursor_radius=14.0)
+        self.compound_eye = CompoundEyeModel(bins=self.bins)
+        self._last_motion_field = MotionField(0.0, 0.0, 0.0, 0.0, 0.0)
         self._last_radial_luminance = np.full(
             (len(self.radii), self.bins),
             0.9,
@@ -228,6 +232,10 @@ class DesktopRetinaSampler:
             1.0,
         ).astype(np.float32)
 
+        eye = self.compound_eye.process(self._last_compound_luminance)
+        self._last_motion_field = eye.motion
+        values = eye.male_cns_panorama
+
         return np.clip(
             values,
             0.0,
@@ -263,5 +271,14 @@ class DesktopRetinaSampler:
             radial_luminance=self._last_radial_luminance,
             compound_luminance=self._last_compound_luminance,
             timestamp=timestamp,
+        )
+        field = self._last_motion_field
+        dynamics = replace(
+            dynamics,
+            optic_flow=float(dynamics.optic_flow + field.horizontal_flow),
+            vertical_optic_flow=field.vertical_flow,
+            optic_expansion=field.expansion,
+            optic_rotation=field.rotation,
+            radial_coherence=field.radial_coherence,
         )
         return luminance, dynamics
