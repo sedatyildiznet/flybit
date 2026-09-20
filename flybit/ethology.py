@@ -13,6 +13,7 @@ import random
 
 from .motion import MotorActivity
 from .phenotype import IndividualPhenotype
+from .sleep import SleepEpisodeModel
 
 
 _NEUTRAL_PHENOTYPE = IndividualPhenotype(
@@ -132,6 +133,8 @@ class EthologyModel:
         self._history: deque[str] = deque(maxlen=12)
         self._micro_refractory = {name: 0.0 for name in ("antenna_sweep", "head_turn", "leg_adjust", "wing_flick", "proboscis")}
         self._micro_inputs = (0.0, 0.0, 0.0, 0.0, 0.0)
+        self._sleep = SleepEpisodeModel()
+        self._sleep_snapshot = self._sleep.tick(0.0, sleeping=False)
 
         base = self.grooming_need
         self._groom_load = {
@@ -311,11 +314,7 @@ class EthologyModel:
     def _sleep_stage(self) -> str:
         if self.mode != "sleep":
             return "awake"
-        if self.mode_elapsed < 1.8:
-            return "drowsy"
-        if self.mode_elapsed < 7.0:
-            return "light"
-        return "deep"
+        return self._sleep_snapshot.stage
 
     def _update_micro_action(self, dt: float) -> tuple[str, float, float]:
         if self.mode != "idle":
@@ -453,6 +452,7 @@ class EthologyModel:
 
         self.mode_elapsed += dt
         self.bout_remaining -= dt
+        self._sleep_snapshot = self._sleep.tick(dt, sleeping=self.mode == "sleep", threat=threat)
 
         landing_drive = 0.0
         flight_saccade = 0.0
@@ -530,7 +530,7 @@ class EthologyModel:
                     "deep": 0.36,
                 }[stage]
                 wake_threshold = stage_threshold + 0.08 * rest
-                if threat >= wake_threshold or neural.forward > 0.16:
+                if self._sleep_snapshot.woke or threat >= wake_threshold or neural.forward > 0.16:
                     self._set_mode(
                         "escape" if threat >= wake_threshold else "idle",
                         0.22,
