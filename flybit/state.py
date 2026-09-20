@@ -4,10 +4,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 
 
-STATE_SCHEMA = 6
+STATE_SCHEMA = 7
 
 
 @dataclass
@@ -101,10 +102,13 @@ def save_state(state: FlybitState) -> None:
     )
     state.display_name = normalize_display_name(state.display_name)
     state.schema = STATE_SCHEMA
-    _path().write_text(
+    path = _path()
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
         json.dumps(asdict(state), indent=2),
         encoding="utf-8",
     )
+    os.replace(temporary, path)
 
 
 def load_state() -> FlybitState:
@@ -165,6 +169,10 @@ def load_state() -> FlybitState:
             TypeError,
             json.JSONDecodeError,
         ):
+            try:
+                os.replace(path, path.with_suffix(path.suffix + ".corrupt"))
+            except OSError:
+                pass
             state = FlybitState.new()
 
     state.launches += 1
