@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 import unittest
 
-from flybit.ethology import EthologyModel
+from flybit.ethology import EthologyModel, EthologyParameters
 from flybit.motion import MotorActivity
 
 
@@ -32,6 +32,20 @@ def boundary(*, strength=0.0, tangent=0.0, inward=1.57):
 
 
 class EthologyModelTest(unittest.TestCase):
+    def test_parameters_expose_bout_ranges_and_seed_is_deterministic(self):
+        params = EthologyParameters()
+        self.assertLess(params.bouts["walk"].minimum, params.bouts["walk"].maximum)
+        a, b = EthologyModel(seed=99), EthologyModel(seed=99)
+        for model in (a, b):
+            model._choose_ground_mode(hunger=.4, food_drive=.2, rest=.2,
+                                      activity=.6, curiosity=.5, boundary_drive=.1)
+        self.assertEqual(a.mode, b.mode)
+        self.assertAlmostEqual(a.bout_remaining, b.bout_remaining)
+
+    def test_recent_history_penalizes_repetitive_activation(self):
+        model = EthologyModel(seed=3)
+        model._history.extend(["turn"] * 12)
+        self.assertEqual(len(model._history), 12)
     def test_left_loom_produces_directional_escape(self):
         model = EthologyModel(seed=1)
         snap = model.tick(

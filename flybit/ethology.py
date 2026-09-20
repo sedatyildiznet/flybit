@@ -6,7 +6,8 @@ names or maps cursor identity directly to actions.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 import math
 import random
 
@@ -25,6 +26,35 @@ _NEUTRAL_PHENOTYPE = IndividualPhenotype(
     body_scale=1.0,
     handedness=0.0,
 )
+
+
+@dataclass(frozen=True)
+class BoutDuration:
+    minimum: float
+    typical: float
+    maximum: float
+
+
+def _default_bouts() -> dict[str, BoutDuration]:
+    return {
+        "idle": BoutDuration(.12, .48, 1.10), "walk": BoutDuration(.22, .80, 1.80),
+        "turn": BoutDuration(.08, .22, .48), "boundary": BoutDuration(.30, 1.10, 2.50),
+        "forage": BoutDuration(.55, 1.40, 3.00), "feed": BoutDuration(.35, 1.40, 3.20),
+        "groom": BoutDuration(.40, .95, 1.90), "sleep": BoutDuration(8.0, 90.0, 900.0),
+        "escape": BoutDuration(.12, .24, .45), "flight": BoutDuration(.35, .95, 2.20),
+        "landing": BoutDuration(.20, .48, .90),
+    }
+
+
+@dataclass(frozen=True)
+class EthologyParameters:
+    softmax_temperature: float = .24
+    state_inertia: float = .08
+    transition_cost: float = .10
+    recent_repeat_penalty: float = .12
+    alert_decay_seconds: float = 12.0
+    escape_threshold_base: float = .42
+    bouts: dict[str, BoutDuration] = field(default_factory=_default_bouts)
 
 
 @dataclass(frozen=True)
@@ -80,9 +110,11 @@ class EthologyModel:
         grooming_need: float = 0.18,
         threat_memory: float = 0.0,
         phenotype: IndividualPhenotype | None = None,
+        parameters: EthologyParameters | None = None,
     ) -> None:
         self.rng = random.Random(int(seed))
         self.phenotype = phenotype or _NEUTRAL_PHENOTYPE
+        self.parameters = parameters or EthologyParameters()
         self.mode = "idle"
         self.mode_elapsed = 0.0
         self.bout_remaining = 0.35
@@ -97,6 +129,9 @@ class EthologyModel:
         self._saccade_remaining = 0.0
         self._saccade_sign = 0.0
         self._saccade_cooldown = self.rng.uniform(0.35, 1.2)
+        self._history: deque[str] = deque(maxlen=12)
+        self._micro_refractory = {name: 0.0 for name in ("antenna_sweep", "head_turn", "leg_adjust", "wing_flick", "proboscis")}
+        self._micro_inputs = (0.0, 0.0, 0.0, 0.0, 0.0)
 
         base = self.grooming_need
         self._groom_load = {
@@ -122,6 +157,7 @@ class EthologyModel:
         changed = mode != self.mode
         self.mode = mode
         if changed:
+            self._history.append(self.mode)
             self.mode_elapsed = 0.0
             self._micro_action = ""
             self._micro_remaining = 0.0
@@ -137,6 +173,10 @@ class EthologyModel:
             )
         if changed and mode == "groom":
             self._groom_target = self._choose_groom_target()
+
+    def _bout_seconds(self, mode: str) -> float:
+        spec = self.parameters.bouts[mode]
+        return self.rng.triangular(spec.minimum, spec.maximum, spec.typical)
 
     def begin_feeding(self, seconds: float = 1.4) -> None:
         self._set_mode("feed", max(0.35, float(seconds)))
@@ -222,7 +262,15 @@ class EthologyModel:
         # when exhausted, forage when odor/hunger are high) while allowing
         # lower-probability sharp turns, pauses and grooming bouts to appear
         # naturally instead of becoming unreachable states.
-        temperature = 0.24
+        for candidate in scores:
+            if candidate == self.mode:
+                scores[candidate] += self.parameters.state_inertia
+            elif self.mode not in {"idle", "sleep"}:
+                scores[candidate] -= self.parameters.transition_cost
+            scores[candidate] -= self.parameters.recent_repeat_penalty * sum(
+                prior == candidate for prior in self._history
+            ) / max(1, self._history.maxlen or 1)
+        temperature = self.parameters.softmax_temperature
         peak = max(scores.values())
         weighted = [
             (
@@ -243,21 +291,21 @@ class EthologyModel:
 
         pause_scale = self.phenotype.pause_scale
         if mode == "sleep":
-            self._set_mode("sleep", self.rng.uniform(5.0, 16.0) * pause_scale)
+            self._set_mode("sleep", self._bout_seconds("sleep") * pause_scale)
         elif mode == "forage":
-            self._set_mode("forage", self.rng.uniform(0.7, 2.5))
+            self._set_mode("forage", self._bout_seconds("forage"))
         elif mode == "groom":
-            self._set_mode("groom", self.rng.uniform(0.55, 1.65))
+            self._set_mode("groom", self._bout_seconds("groom"))
         elif mode == "boundary":
-            self._set_mode("boundary", self.rng.uniform(0.45, 2.2))
+            self._set_mode("boundary", self._bout_seconds("boundary"))
         elif mode == "walk":
-            self._set_mode("walk", self.rng.uniform(0.28, 1.55))
+            self._set_mode("walk", self._bout_seconds("walk"))
         elif mode == "turn":
-            self._set_mode("turn", self.rng.uniform(0.10, 0.42))
+            self._set_mode("turn", self._bout_seconds("turn"))
         else:
             self._set_mode(
                 "idle",
-                self.rng.uniform(0.16, 0.95) * pause_scale,
+                self._bout_seconds("idle") * pause_scale,
             )
 
     def _sleep_stage(self) -> str:
@@ -276,17 +324,30 @@ class EthologyModel:
             return "", 0.0, 0.0
 
         self._micro_remaining -= dt
+        for key in self._micro_refractory:
+            self._micro_refractory[key] = max(0.0, self._micro_refractory[key] - dt)
         if self._micro_remaining <= 0.0:
-            choices = [
-                "antenna_sweep",
-                "head_turn",
-                "leg_adjust",
-                "wing_flick",
-                "still",
-                "still",
-                "proboscis",
-            ]
-            self._micro_action = self.rng.choice(choices)
+            odor, flow, instability, arousal, hunger = self._micro_inputs
+            weights = {
+                "antenna_sweep": .12 + .65 * odor + .18 * arousal,
+                "head_turn": .10 + .55 * min(1.0, abs(flow)) + .25 * arousal,
+                "leg_adjust": .08 + .85 * instability,
+                "wing_flick": .06 + .38 * arousal + .30 * self.grooming_need,
+                "proboscis": .04 + .72 * odor * hunger,
+                "still": .38,
+            }
+            for key in tuple(weights):
+                if key != "still" and self._micro_refractory[key] > 0.0:
+                    weights[key] = 0.0
+            roll = self.rng.random() * sum(weights.values())
+            self._micro_action = "still"
+            for key, weight in weights.items():
+                roll -= weight
+                if roll <= 0.0:
+                    self._micro_action = key
+                    break
+            if self._micro_action != "still":
+                self._micro_refractory[self._micro_action] = self.rng.uniform(.8, 3.2)
             self._micro_remaining = self.rng.uniform(0.18, 0.72) / max(
                 0.65,
                 self.phenotype.micro_activity,
@@ -327,6 +388,8 @@ class EthologyModel:
         curiosity: float = 0.5,
         threat_arousal: float = 0.0,
         airborne: bool = False,
+        proprioception=None,
+        memory_bias=None,
     ) -> EthologySnapshot:
         dt = max(0.001, min(0.20, float(dt)))
         hunger = self._clamp01(hunger_drive)
@@ -363,7 +426,16 @@ class EthologyModel:
 
         boundary_drive = self._clamp01(getattr(boundary, "strength", 0.0))
 
-        self.alertness *= math.exp(-dt / 12.0)
+        memory_threat = self._clamp01(getattr(memory_bias, "threat_bias", 0.0))
+        memory_food = max(-.25, min(.25, float(getattr(memory_bias, "food_bias", 0.0))))
+        memory_rest = max(-.25, min(.25, float(getattr(memory_bias, "rest_bias", 0.0))))
+        threat = self._clamp01(threat + .20 * memory_threat)
+        food_drive = self._clamp01(food_drive + memory_food)
+        rest = self._clamp01(rest + memory_rest)
+        instability = 1.0 - self._clamp01(getattr(proprioception, "stability", 1.0))
+        self._micro_inputs = (odor_salience, optic_flow, instability, arousal, hunger)
+
+        self.alertness *= math.exp(-dt / self.parameters.alert_decay_seconds)
         if threat > 0.0:
             self.alertness = max(
                 self.alertness,
@@ -440,7 +512,7 @@ class EthologyModel:
                 0.14,
                 min(
                     0.64,
-                    0.42
+                    self.parameters.escape_threshold_base
                     + 0.18 * boldness
                     - 0.22 * self.alertness
                     + self.phenotype.startle_bias,
