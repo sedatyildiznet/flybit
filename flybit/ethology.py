@@ -529,6 +529,7 @@ class EthologyModel:
                     "drowsy": 0.16,
                     "light": 0.24,
                     "deep": 0.36,
+                    "micro-awake": 0.14,
                 }[stage]
                 wake_threshold = stage_threshold + 0.08 * rest
                 if self._sleep_snapshot.woke or threat >= wake_threshold or neural.forward > 0.16:

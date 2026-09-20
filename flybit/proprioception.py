@@ -35,7 +35,9 @@ class ProprioceptionSnapshot:
 
     @property
     def landing_contact(self) -> bool:
-        return self.touchdown_count > 0 and self.contact_count >= 2 and self.stability >= 0.22
+        # Touchdown may occur one integration step before altitude reaches the
+        # body-contact plane, so sustained loaded contact is also valid.
+        return self.contact_count >= 3 and self.total_load >= 0.45 and self.stability >= 0.22
 
 
 class ProprioceptionModel:
@@ -68,7 +70,7 @@ class ProprioceptionModel:
         geometry = query_local_geometry(surfaces, x, y, 32.0, bounds)
         contacts: list[LegContact] = []
         contact_points: list[tuple[float, float]] = []
-        stance_candidates = [leg for leg in legs if leg.stance or leg.lift < 0.18]
+        stance_candidates = [leg for leg in legs if leg.stance or leg.lift < 0.42]
         load_each = 1.0 / max(1, len(stance_candidates))
         for leg in legs:
             fx, fy = self._world_foot(x, y, heading, leg)
@@ -76,7 +78,7 @@ class ProprioceptionModel:
             support_id = support.id if support is not None else 0
             local = query_local_geometry(surfaces, fx, fy, 24.0, bounds)
             extended_contact = altitude <= max(0.7, 2.3 * (1.0 - leg.lift))
-            contact = bool((leg.stance or leg.lift < 0.18) and extended_contact)
+            contact = bool((leg.stance or leg.lift < 0.42) and extended_contact)
             previous = self._contact.get(leg.name, False)
             prior_pos = self._last_foot.get(leg.name, (fx, fy))
             foot_speed = math.hypot(fx - prior_pos[0], fy - prior_pos[1]) / dt

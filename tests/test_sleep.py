@@ -18,6 +18,13 @@ class SleepEpisodeTest(unittest.TestCase):
         snap = model.tick(.02, sleeping=True, threat=.8)
         self.assertTrue(snap.woke)
 
+    def test_long_episode_has_brief_micro_awake_stage(self):
+        model = SleepEpisodeModel()
+        seen = False
+        for _ in range(4000):
+            seen |= model.tick(.02, sleeping=True).stage == "micro-awake"
+        self.assertTrue(seen)
+
     def test_offline_progress_is_bounded_and_recovers(self):
         model = SleepEpisodeModel()
         self.assertLess(model.offline_progress(8 * 3600, .9), .9)

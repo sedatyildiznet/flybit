@@ -17,6 +17,10 @@ class BehaviorAssayTest(unittest.TestCase):
         self.assertIsNotNone(report.startle_latency_ms)
         self.assertLess(report.startle_latency_ms, 250)
 
+    def test_flight_assay_requires_proprioceptive_landing(self):
+        report = run_assay("flight_landing", seed=64, duration=8)
+        self.assertGreaterEqual(report.landing_success, .5)
+
     def test_deterministic_regression_tolerance(self):
         a = run_assay("baseline", seed=13, duration=4)
         b = run_assay("baseline", seed=13, duration=4)
