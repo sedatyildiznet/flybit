@@ -6,6 +6,7 @@ import math
 
 from .gait import GaitSnapshot, LegPose, SixLegGait
 from .phenotype import IndividualPhenotype
+from .proprioception import ProprioceptionModel, ProprioceptionSnapshot
 from .world import Surface, support_at
 
 
@@ -68,6 +69,13 @@ class FlyBodyState:
     flight_energy: float = 0.0
     altitude: float = 0.0
     vertical_velocity: float = 0.0
+    pitch: float = 0.0
+    roll: float = 0.0
+    yaw_rate: float = 0.0
+    pitch_rate: float = 0.0
+    roll_rate: float = 0.0
+    left_wing_drive: float = 0.0
+    right_wing_drive: float = 0.0
     support_id: int | None = 0
     support_title: str = "Desktop"
 
@@ -97,6 +105,14 @@ class BiomechanicsSnapshot:
     landing_drive: float
     support_title: str
     legs: tuple[LegPose, ...]
+    pitch: float
+    roll: float
+    yaw_rate: float
+    pitch_rate: float
+    roll_rate: float
+    left_wing_drive: float
+    right_wing_drive: float
+    proprioception: ProprioceptionSnapshot
 
 
 class FlyKinematics:
@@ -129,6 +145,8 @@ class FlyKinematics:
         self._landing_drive = 0.0
         self._gait = SixLegGait(stride_scale=self.phenotype.stride_scale)
         self._gait_snapshot = self._gait.snapshot
+        self._proprioception = ProprioceptionModel()
+        self._proprio_snapshot: ProprioceptionSnapshot | None = None
 
     @staticmethod
     def _lowpass(
@@ -292,9 +310,22 @@ class FlyKinematics:
             )
 
         if s.airborne:
+            s.left_wing_drive = self._lowpass(s.left_wing_drive, max(motor.flight_left, self._escape), dt, 0.035)
+            s.right_wing_drive = self._lowpass(s.right_wing_drive, max(motor.flight_right, self._escape), dt, 0.035)
+            wing_sum = 0.5 * (s.left_wing_drive + s.right_wing_drive)
+            wing_difference = s.right_wing_drive - s.left_wing_drive
+            # Bilateral sum provides lift/thrust; difference produces roll and
+            # yaw.  These are modeled body dynamics, not MaleCNS measurements.
+            s.roll_rate += (wing_difference * 22.0 - s.roll_rate * 5.5) * dt
+            s.yaw_rate += (wing_difference * 13.0 - s.yaw_rate * 4.2) * dt
+            pitch_target = max(-0.32, min(0.35, 0.12 - 0.28 * self._landing_drive))
+            s.pitch_rate += ((pitch_target - s.pitch) * 12.0 - s.pitch_rate * 5.0) * dt
+            s.roll = max(-0.75, min(0.75, s.roll + s.roll_rate * dt))
+            s.pitch = max(-0.55, min(0.55, s.pitch + s.pitch_rate * dt))
+            s.heading = self._wrap_angle(s.heading + s.yaw_rate * dt)
             gravity = 180.0
             lift = (
-                motor.flight * 230.0
+                wing_sum * 230.0
                 + self._escape * 300.0
             ) * physiology_gain
             lift *= 1.0 - 0.82 * self._landing_drive
@@ -314,29 +345,6 @@ class FlyKinematics:
 
             if s.altitude <= 0.0:
                 s.altitude = 0.0
-                can_land = (
-                    self._landing_drive > 0.18
-                    or (
-                        self._escape < 0.025
-                        and motor.flight < 0.04
-                    )
-                )
-                if can_land:
-                    s.airborne = False
-                    s.vertical_velocity = 0.0
-                    s.flight_energy = 0.0
-                    events.append(
-                        MotionEvent(
-                            "land",
-                            "leg extension -> six-point substrate contact",
-                        )
-                    )
-                else:
-                    s.altitude = 0.5
-                    s.vertical_velocity = max(
-                        20.0,
-                        s.vertical_velocity,
-                    )
         else:
             s.altitude = 0.0
             s.vertical_velocity = 0.0
@@ -348,11 +356,43 @@ class FlyKinematics:
             speed_norm=planned_ground_norm,
             turn_rate=s.angular_velocity,
             airborne=s.airborne,
-            landing_drive=self._landing_drive,
+            landing_drive=max(
+                self._landing_drive,
+                (1.0 - min(1.0, s.altitude / 8.0))
+                if s.airborne and self._escape < 0.025 and motor.flight < 0.04
+                else 0.0,
+            ),
             takeoff_preload=takeoff_preload,
             groom_target=groom_target,
             micro_action=micro_action,
         )
+        self._proprio_snapshot = self._proprioception.update(
+            x=s.x, y=s.y, heading=s.heading, altitude=s.altitude,
+            vertical_velocity=s.vertical_velocity, legs=tuple(self._gait_snapshot.legs),
+            surfaces=surfaces, bounds=bounds, dt=dt,
+            body_speed=math.hypot(s.vx, s.vy),
+        )
+        if s.airborne and s.altitude <= 0.0:
+            passive = self._escape < 0.025 and motor.flight < 0.04
+            if self._proprio_snapshot.landing_contact and (self._landing_drive > 0.18 or passive):
+                s.airborne = False
+                s.vertical_velocity = 0.0
+                s.flight_energy = 0.0
+                s.pitch = s.roll = 0.0
+                events.append(MotionEvent("land", "proprioceptive multi-leg substrate contact"))
+            else:
+                # Contact was not stable: abort or recover instead of declaring
+                # a landing from altitude alone.
+                s.altitude = 0.5
+                s.vertical_velocity = max(20.0, s.vertical_velocity)
+                if self._proprio_snapshot.stumble:
+                    events.append(MotionEvent("landing_abort", "unstable leg contact"))
+
+        if self._proprio_snapshot.stumble and not s.airborne:
+            s.vx *= 0.42
+            s.vy *= 0.42
+            s.angular_velocity += (0.7 if self.phenotype.handedness >= 0.0 else -0.7)
+            events.append(MotionEvent("stumble_recovery", "load redistribution"))
 
         if s.airborne:
             speed_target = (
@@ -492,6 +532,14 @@ class FlyKinematics:
 
     def biomechanics(self) -> BiomechanicsSnapshot:
         gait: GaitSnapshot = self._gait_snapshot
+        proprio = self._proprio_snapshot
+        if proprio is None:
+            proprio = self._proprioception.update(
+                x=self.state.x, y=self.state.y, heading=self.state.heading,
+                altitude=self.state.altitude, vertical_velocity=self.state.vertical_velocity,
+                legs=tuple(gait.legs), surfaces=[],
+                bounds=(-100000.0, -100000.0, 100000.0, 100000.0), dt=0.02,
+            )
         return BiomechanicsSnapshot(
             speed=float(self._last_speed),
             acceleration=float(self._acceleration),
@@ -521,4 +569,8 @@ class FlyKinematics:
             landing_drive=float(self._landing_drive),
             support_title=str(self.state.support_title),
             legs=tuple(gait.legs),
+            pitch=float(self.state.pitch), roll=float(self.state.roll),
+            yaw_rate=float(self.state.yaw_rate), pitch_rate=float(self.state.pitch_rate),
+            roll_rate=float(self.state.roll_rate), left_wing_drive=float(self.state.left_wing_drive),
+            right_wing_drive=float(self.state.right_wing_drive), proprioception=proprio,
         )
