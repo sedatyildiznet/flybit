@@ -949,3 +949,12 @@ Flybit code is distributed under the **MIT License** unless a file states otherw
 MaleCNS data remains under its original data license.
 
 See **[LICENSE](LICENSE)**.
+
+
+## Android APK
+
+Flybit v0.6.0 adds a native Android companion with an optional system overlay, persistent organism state, mobile care controls and Overview / Brain / Care / Logs telemetry.
+
+The Android target preserves the Flybit pipeline while keeping its evidence boundary explicit: it uses a **MODELED MOBILE CNS** and does not claim to execute the Python/Numba MaleCNS connectome on-device.
+
+The release workflow publishes an installable `Flybit-Android.apk` beside the Windows package. See `android/README.md` for architecture, permissions and build details.
