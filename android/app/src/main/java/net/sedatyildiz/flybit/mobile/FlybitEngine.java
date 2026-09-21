@@ -107,6 +107,7 @@ public final class FlybitEngine {
     private float steer;
     private float escape;
     private float flight;
+    private float flightBoutRemaining;
 
     private boolean foodActive;
     private float foodX;
@@ -125,7 +126,7 @@ public final class FlybitEngine {
         }
         random = new Random(seed ^ System.nanoTime());
 
-        displayName = normalizeName(prefs.getString("display_name", "Flybit"));
+        displayName = normalizeDisplayName(prefs.getString("display_name", "Flybit"));
         x = prefs.getFloat("x", 0.55f);
         y = prefs.getFloat("y", 0.42f);
         heading = prefs.getFloat("heading", random.nextFloat() * 6.2831855f);
@@ -134,6 +135,10 @@ public final class FlybitEngine {
         sleepPressure = prefs.getFloat("sleep_pressure", 0.35f);
         groomingNeed = prefs.getFloat("grooming_need", 0.18f);
         threatMemory = prefs.getFloat("threat_memory", 0f);
+        arousal = clamp01(prefs.getFloat("arousal", 0f));
+        behavior = prefs.getString("behavior", "REST");
+        previousOdor = clamp01(prefs.getFloat("odor", 0f));
+        odor = previousOdor;
         foodActive = prefs.getBoolean("food_active", false);
         foodX = prefs.getFloat("food_x", 0.25f);
         foodY = prefs.getFloat("food_y", 0.72f);
@@ -157,6 +162,7 @@ public final class FlybitEngine {
         groomingNeed = clamp01(groomingNeed + dt * 0.00017f);
         threatMemory = clamp01(threatMemory - dt * 0.010f);
         touchThreat = Math.max(0f, touchThreat - dt * 1.45f);
+        flightBoutRemaining = Math.max(0f, flightBoutRemaining - dt);
 
         int hour = ZonedDateTime.now().getHour();
         boolean circadianNight = hour >= 23 || hour < 7;
@@ -182,7 +188,10 @@ public final class FlybitEngine {
 
         // ethology selection: internal state selects behavior, not direct UI commands.
         if (arousal > 0.56f) {
+            flightBoutRemaining = 0f;
             behavior = "ESCAPE";
+        } else if (flightBoutRemaining > 0f && energy > 0.24f) {
+            behavior = "FLIGHT";
         } else if (sleepPressure > 0.80f && energy < 0.72f) {
             behavior = "REST";
         } else if (groomingNeed > 0.78f && hunger < 0.78f) {
@@ -190,7 +199,13 @@ public final class FlybitEngine {
         } else if (foodActive && hunger > 0.46f && odor > 0.13f) {
             behavior = "FORAGE";
         } else if (energy > 0.32f) {
-            behavior = random.nextFloat() < dt * 0.055f ? "FLIGHT" : "WALK";
+            if (random.nextFloat() < dt * 0.055f) {
+                flightBoutRemaining = 0.45f + random.nextFloat() * 0.80f;
+                behavior = "FLIGHT";
+                setEvent("spontaneous flight bout initiated");
+            } else {
+                behavior = "WALK";
+            }
         } else {
             behavior = "REST";
         }
@@ -297,7 +312,7 @@ public final class FlybitEngine {
     }
 
     public synchronized void setDisplayName(String name) {
-        displayName = normalizeName(name);
+        displayName = normalizeDisplayName(name);
         setEvent("identity updated");
         persist();
     }
@@ -376,10 +391,19 @@ public final class FlybitEngine {
         lastEvent = String.format(Locale.US, "%s · %s", Instant.now().toString(), event);
     }
 
-    private static String normalizeName(String raw) {
+    public static String normalizeDisplayName(String raw) {
         String text = raw == null ? "" : raw.trim().replaceAll("\\s+", " ");
         if (text.isEmpty()) return "Flybit";
         return text.substring(0, Math.min(32, text.length()));
+    }
+
+    public static void storeDisplayName(Context context, String name) {
+        String normalized = normalizeDisplayName(name);
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putString("display_name", normalized)
+                .putString("last_event", Instant.now() + " · identity updated")
+                .apply();
     }
 
     private static float ramp(float v, float width) {
