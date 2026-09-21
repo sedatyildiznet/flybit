@@ -126,6 +126,7 @@ public final class OverlayService extends Service {
         flyParams.y = Math.round(s.y * height - size * 0.5f);
 
         windowManager.addView(flyView, flyParams);
+        getSharedPreferences(FlybitEngine.PREFS, MODE_PRIVATE).edit().putBoolean("overlay_running", true).apply();
         lastFrameNs = System.nanoTime();
         handler.removeCallbacks(frameLoop);
         handler.post(frameLoop);
@@ -219,6 +220,7 @@ public final class OverlayService extends Service {
         }
         flyView = null;
         sugarView = null;
+        getSharedPreferences(FlybitEngine.PREFS, MODE_PRIVATE).edit().putBoolean("overlay_running", false).apply();
         stopForeground(STOP_FOREGROUND_REMOVE);
         super.onDestroy();
     }
