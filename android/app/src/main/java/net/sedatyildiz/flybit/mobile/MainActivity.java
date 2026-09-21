@@ -32,6 +32,9 @@ public final class MainActivity extends Activity {
     private static final int TEXT = 0xFFF2F4F7;
     private static final int MUTED = 0xFF9AA4B2;
     private static final int ACCENT = 0xFF67E8F9;
+    private static final String STATE_ACTIVE_TAB = "active_tab";
+    private static final String PREF_PENDING_OVERLAY_ACTION = "pending_overlay_action";
+    private static final long OVERLAY_HEARTBEAT_TIMEOUT_MS = 3_000L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
@@ -76,7 +79,7 @@ public final class MainActivity extends Activity {
         TextView title = text("FLYBIT", 24, TEXT);
         title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         titleBox.addView(title);
-        titleBox.addView(text("Android screen organism · v0.6.0", 12, MUTED));
+        titleBox.addView(text("Android screen organism · v" + BuildConfig.VERSION_NAME, 12, MUTED));
         header.addView(titleBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         status = text("● OFFLINE", 12, ACCENT);
@@ -121,7 +124,8 @@ public final class MainActivity extends Activity {
         root.addView(content, cp);
 
         setContentView(root);
-        showTab(0);
+        activeTab = savedInstanceState == null ? 0 : savedInstanceState.getInt(STATE_ACTIVE_TAB, 0);
+        showTab(activeTab);
     }
 
     @Override
@@ -129,6 +133,12 @@ public final class MainActivity extends Activity {
         super.onResume();
         handler.removeCallbacks(refresh);
         handler.post(refresh);
+
+        String pendingAction = prefs.getString(PREF_PENDING_OVERLAY_ACTION, "");
+        if (!pendingAction.isEmpty() && Settings.canDrawOverlays(this)) {
+            prefs.edit().remove(PREF_PENDING_OVERLAY_ACTION).apply();
+            handler.post(() -> sendServiceAction(pendingAction));
+        }
     }
 
     @Override
@@ -137,8 +147,15 @@ public final class MainActivity extends Activity {
         super.onPause();
     }
 
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        outState.putInt(STATE_ACTIVE_TAB, activeTab);
+        super.onSaveInstanceState(outState);
+    }
+
     private void showTab(int index) {
         activeTab = index;
+        clearTabReferences();
         content.removeAllViews();
 
         ScrollView scroll = new ScrollView(this);
@@ -214,11 +231,7 @@ public final class MainActivity extends Activity {
         body.addView(nameInput, matchWrap(dp(6)));
 
         Button saveName = actionButton("Save name");
-        saveName.setOnClickListener(v -> {
-            FlybitEngine engine = new FlybitEngine(this);
-            engine.setDisplayName(nameInput.getText().toString());
-            updateTelemetry();
-        });
+        saveName.setOnClickListener(v -> saveDisplayName());
         body.addView(saveName, matchWrap(dp(6)));
 
         body.addView(label("HUNGER"));
@@ -287,31 +300,67 @@ public final class MainActivity extends Activity {
     }
 
     private void startOverlay() {
-        if (!Settings.canDrawOverlays(this)) {
-            Intent intent = new Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:" + getPackageName())
-            );
-            startActivity(intent);
-            return;
-        }
         sendServiceAction(OverlayService.ACTION_START);
     }
 
+    private void requestOverlayPermissionThen(String action) {
+        prefs.edit().putString(PREF_PENDING_OVERLAY_ACTION, action).apply();
+        Intent intent = new Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:" + getPackageName())
+        );
+        startActivity(intent);
+    }
+
     private void sendServiceAction(String action) {
-        if (!Settings.canDrawOverlays(this) && OverlayService.ACTION_START.equals(action)) {
-            startOverlay();
+        boolean requiresOverlay = OverlayService.ACTION_START.equals(action)
+                || OverlayService.ACTION_FEED.equals(action);
+        if (requiresOverlay && !Settings.canDrawOverlays(this)) {
+            requestOverlayPermissionThen(action);
             return;
         }
+
         Intent intent = new Intent(this, OverlayService.class);
         intent.setAction(action);
         startForegroundService(intent);
     }
 
+    private void saveDisplayName() {
+        String normalized = FlybitEngine.normalizeDisplayName(nameInput.getText().toString());
+        nameInput.setText(normalized);
+
+        if (isOverlayAlive()) {
+            Intent intent = new Intent(this, OverlayService.class);
+            intent.setAction(OverlayService.ACTION_SET_NAME);
+            intent.putExtra(OverlayService.EXTRA_DISPLAY_NAME, normalized);
+            startForegroundService(intent);
+        } else {
+            FlybitEngine.storeDisplayName(this, normalized);
+        }
+        updateTelemetry();
+    }
+
+    private boolean isOverlayAlive() {
+        boolean running = prefs.getBoolean(OverlayService.PREF_OVERLAY_RUNNING, false);
+        long heartbeat = prefs.getLong(OverlayService.PREF_OVERLAY_HEARTBEAT_MS, 0L);
+        long age = heartbeat <= 0L ? Long.MAX_VALUE : Math.max(0L, System.currentTimeMillis() - heartbeat);
+        boolean alive = running
+                && age <= OVERLAY_HEARTBEAT_TIMEOUT_MS
+                && Settings.canDrawOverlays(this);
+
+        if (running && !alive) {
+            prefs.edit()
+                    .putBoolean(OverlayService.PREF_OVERLAY_RUNNING, false)
+                    .putLong(OverlayService.PREF_OVERLAY_HEARTBEAT_MS, 0L)
+                    .apply();
+        }
+        return alive;
+    }
+
     private void updateTelemetry() {
         if (prefs == null) return;
 
-        boolean overlay = prefs.getBoolean("overlay_running", false);
+        boolean overlay = isOverlayAlive();
         if (status != null) {
             status.setText(overlay ? "● LIVING ON SCREEN" : "● PANEL MODE");
         }
@@ -371,16 +420,36 @@ public final class MainActivity extends Activity {
         if (logs != null) {
             String event = prefs.getString("last_event", "No organism event recorded yet.");
             long simulated = prefs.getLong("last_simulated_ms", 0L);
+            long heartbeat = prefs.getLong(OverlayService.PREF_OVERLAY_HEARTBEAT_MS, 0L);
+            long heartbeatAge = heartbeat <= 0L
+                    ? -1L
+                    : Math.max(0L, System.currentTimeMillis() - heartbeat);
             logs.setText(
                     event
                             + "\n\nlast simulation ms: " + simulated
                             + "\nmode: MODELED MOBILE CNS"
                             + "\noverlay permission: " + Settings.canDrawOverlays(this)
+                            + "\noverlay heartbeat age ms: " + heartbeatAge
             );
         }
 
         if (habitat != null) habitat.invalidate();
         if (brainMap != null) brainMap.invalidate();
+    }
+
+    private void clearTabReferences() {
+        behavior = null;
+        motor = null;
+        sensory = null;
+        physiology = null;
+        careDetail = null;
+        logs = null;
+        hunger = null;
+        energy = null;
+        sleep = null;
+        nameInput = null;
+        habitat = null;
+        brainMap = null;
     }
 
     private TextView metricCard(LinearLayout parent, String title) {

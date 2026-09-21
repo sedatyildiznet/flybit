@@ -3,7 +3,9 @@ name: Android check
 on:
   push:
     branches:
+      - "main"
       - "feature/**"
+      - "fix/**"
     paths:
       - "android/**"
       - ".github/workflows/android-check.yml"
@@ -43,5 +45,5 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Assemble Android APK
-        run: gradle -p android clean assembleDebug
+      - name: Lint and assemble Android APK
+        run: gradle -p android clean lintDebug assembleDebug

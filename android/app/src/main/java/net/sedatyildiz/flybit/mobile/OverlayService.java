@@ -19,9 +19,15 @@ public final class OverlayService extends Service {
     public static final String ACTION_STOP = "net.sedatyildiz.flybit.action.STOP";
     public static final String ACTION_FEED = "net.sedatyildiz.flybit.action.FEED";
     public static final String ACTION_POKE = "net.sedatyildiz.flybit.action.POKE";
+    public static final String ACTION_SET_NAME = "net.sedatyildiz.flybit.action.SET_NAME";
+    public static final String EXTRA_DISPLAY_NAME = "display_name";
+    public static final String PREF_OVERLAY_RUNNING = "overlay_running";
+    public static final String PREF_OVERLAY_HEARTBEAT_MS = "overlay_heartbeat_ms";
 
     private static final String CHANNEL_ID = "flybit_organism";
     private static final int NOTIFICATION_ID = 601;
+    private static final long HEARTBEAT_INTERVAL_MS = 1_000L;
+    private static final long PERMISSION_CHECK_INTERVAL_NS = 1_000_000_000L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private WindowManager windowManager;
@@ -31,6 +37,8 @@ public final class OverlayService extends Service {
     private WindowManager.LayoutParams sugarParams;
     private FlybitEngine engine;
     private long lastFrameNs;
+    private long lastPermissionCheckNs;
+    private long lastHeartbeatMs;
 
     private final Runnable frameLoop = new Runnable() {
         @Override
@@ -40,6 +48,14 @@ public final class OverlayService extends Service {
             }
 
             long now = System.nanoTime();
+            if (now - lastPermissionCheckNs >= PERMISSION_CHECK_INTERVAL_NS) {
+                lastPermissionCheckNs = now;
+                if (!Settings.canDrawOverlays(OverlayService.this)) {
+                    stopForOverlayFailure();
+                    return;
+                }
+            }
+
             float dt = lastFrameNs == 0L ? 1f / 30f : (now - lastFrameNs) / 1_000_000_000f;
             lastFrameNs = now;
             engine.step(dt);
@@ -48,15 +64,21 @@ public final class OverlayService extends Service {
             int width = getResources().getDisplayMetrics().widthPixels;
             int height = getResources().getDisplayMetrics().heightPixels;
 
-            flyParams.x = Math.round(s.x * width - flyParams.width * 0.5f);
-            flyParams.y = Math.round(s.y * height - flyParams.height * 0.5f);
+            flyParams.x = worldCenterX(s.x, width) - flyParams.width / 2;
+            flyParams.y = worldCenterY(s.y, height) - flyParams.height / 2;
             flyView.setMotion(s.heading, s.behavior);
 
             try {
                 windowManager.updateViewLayout(flyView, flyParams);
                 syncSugarOverlay(s, width, height);
-            } catch (IllegalArgumentException ignored) {
+            } catch (RuntimeException ignored) {
+                stopForOverlayFailure();
                 return;
+            }
+
+            long wallClockMs = System.currentTimeMillis();
+            if (wallClockMs - lastHeartbeatMs >= HEARTBEAT_INTERVAL_MS) {
+                markOverlayAlive(wallClockMs);
             }
 
             handler.postDelayed(this, 33L);
@@ -81,22 +103,27 @@ public final class OverlayService extends Service {
             return START_NOT_STICKY;
         }
 
-        if (ACTION_FEED.equals(action)) {
+        if (ACTION_SET_NAME.equals(action)) {
+            engine.setDisplayName(intent == null ? null : intent.getStringExtra(EXTRA_DISPLAY_NAME));
+        } else if (ACTION_FEED.equals(action)) {
             engine.placeSugar();
         } else if (ACTION_POKE.equals(action)) {
             engine.registerTouchThreat();
         }
 
-        if (Settings.canDrawOverlays(this)) {
-            ensureOverlay();
+        if (!Settings.canDrawOverlays(this)) {
+            engine.persist();
+            markOverlayStopped();
+            stopSelf(startId);
+            return START_NOT_STICKY;
         }
 
-        return START_STICKY;
+        return ensureOverlay() ? START_STICKY : START_NOT_STICKY;
     }
 
-    private void ensureOverlay() {
+    private boolean ensureOverlay() {
         if (flyView != null) {
-            return;
+            return true;
         }
 
         int size = dp(82);
@@ -122,14 +149,25 @@ public final class OverlayService extends Service {
         FlybitEngine.Snapshot s = engine.snapshot();
         int width = getResources().getDisplayMetrics().widthPixels;
         int height = getResources().getDisplayMetrics().heightPixels;
-        flyParams.x = Math.round(s.x * width - size * 0.5f);
-        flyParams.y = Math.round(s.y * height - size * 0.5f);
+        flyParams.x = worldCenterX(s.x, width) - size / 2;
+        flyParams.y = worldCenterY(s.y, height) - size / 2;
 
-        windowManager.addView(flyView, flyParams);
-        getSharedPreferences(FlybitEngine.PREFS, MODE_PRIVATE).edit().putBoolean("overlay_running", true).apply();
+        try {
+            windowManager.addView(flyView, flyParams);
+        } catch (RuntimeException ignored) {
+            flyView = null;
+            flyParams = null;
+            stopForOverlayFailure();
+            return false;
+        }
+
+        long nowMs = System.currentTimeMillis();
+        markOverlayAlive(nowMs);
         lastFrameNs = System.nanoTime();
+        lastPermissionCheckNs = lastFrameNs;
         handler.removeCallbacks(frameLoop);
         handler.post(frameLoop);
+        return true;
     }
 
     private void syncSugarOverlay(FlybitEngine.Snapshot s, int width, int height) {
@@ -147,12 +185,12 @@ public final class OverlayService extends Service {
                         PixelFormat.TRANSLUCENT
                 );
                 sugarParams.gravity = Gravity.TOP | Gravity.START;
-                sugarParams.x = Math.round(s.foodX * width - size * 0.5f);
-                sugarParams.y = Math.round(s.foodY * height - size * 0.5f);
+                sugarParams.x = worldCenterX(s.foodX, width) - size / 2;
+                sugarParams.y = worldCenterY(s.foodY, height) - size / 2;
                 windowManager.addView(sugarView, sugarParams);
             } else {
-                sugarParams.x = Math.round(s.foodX * width - sugarParams.width * 0.5f);
-                sugarParams.y = Math.round(s.foodY * height - sugarParams.height * 0.5f);
+                sugarParams.x = worldCenterX(s.foodX, width) - sugarParams.width / 2;
+                sugarParams.y = worldCenterY(s.foodY, height) - sugarParams.height / 2;
                 windowManager.updateViewLayout(sugarView, sugarParams);
             }
         } else if (sugarView != null) {
@@ -163,6 +201,30 @@ public final class OverlayService extends Service {
             sugarView = null;
             sugarParams = null;
         }
+    }
+
+    private void markOverlayAlive(long nowMs) {
+        lastHeartbeatMs = nowMs;
+        getSharedPreferences(FlybitEngine.PREFS, MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_OVERLAY_RUNNING, true)
+                .putLong(PREF_OVERLAY_HEARTBEAT_MS, nowMs)
+                .apply();
+    }
+
+    private void markOverlayStopped() {
+        lastHeartbeatMs = 0L;
+        getSharedPreferences(FlybitEngine.PREFS, MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_OVERLAY_RUNNING, false)
+                .putLong(PREF_OVERLAY_HEARTBEAT_MS, 0L)
+                .apply();
+    }
+
+    private void stopForOverlayFailure() {
+        handler.removeCallbacks(frameLoop);
+        markOverlayStopped();
+        stopSelf();
     }
 
     private Notification buildNotification() {
@@ -194,6 +256,22 @@ public final class OverlayService extends Service {
         manager.createNotificationChannel(channel);
     }
 
+    private int worldCenterX(float normalized, int width) {
+        int halfBody = flyParams == null ? dp(41) : flyParams.width / 2;
+        int usable = Math.max(0, width - halfBody * 2);
+        return halfBody + Math.round(clamp01(normalized) * usable);
+    }
+
+    private int worldCenterY(float normalized, int height) {
+        int halfBody = flyParams == null ? dp(41) : flyParams.height / 2;
+        int usable = Math.max(0, height - halfBody * 2);
+        return halfBody + Math.round(clamp01(normalized) * usable);
+    }
+
+    private static float clamp01(float value) {
+        return Math.max(0f, Math.min(1f, value));
+    }
+
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
@@ -220,7 +298,7 @@ public final class OverlayService extends Service {
         }
         flyView = null;
         sugarView = null;
-        getSharedPreferences(FlybitEngine.PREFS, MODE_PRIVATE).edit().putBoolean("overlay_running", false).apply();
+        markOverlayStopped();
         stopForeground(STOP_FOREGROUND_REMOVE);
         super.onDestroy();
     }
