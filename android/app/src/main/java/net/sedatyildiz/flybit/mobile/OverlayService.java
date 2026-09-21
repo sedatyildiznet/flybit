@@ -19,9 +19,15 @@ public final class OverlayService extends Service {
     public static final String ACTION_STOP = "net.sedatyildiz.flybit.action.STOP";
     public static final String ACTION_FEED = "net.sedatyildiz.flybit.action.FEED";
     public static final String ACTION_POKE = "net.sedatyildiz.flybit.action.POKE";
+    public static final String ACTION_SET_NAME = "net.sedatyildiz.flybit.action.SET_NAME";
+    public static final String EXTRA_DISPLAY_NAME = "display_name";
+    public static final String PREF_OVERLAY_RUNNING = "overlay_running";
+    public static final String PREF_OVERLAY_HEARTBEAT_MS = "overlay_heartbeat_ms";
 
     private static final String CHANNEL_ID = "flybit_organism";
     private static final int NOTIFICATION_ID = 601;
+    private static final long HEARTBEAT_INTERVAL_MS = 1_000L;
+    private static final long PERMISSION_CHECK_INTERVAL_NS = 1_000_000_000L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private WindowManager windowManager;
@@ -31,6 +37,8 @@ public final class OverlayService extends Service {
     private WindowManager.LayoutParams sugarParams;
     private FlybitEngine engine;
     private long lastFrameNs;
+    private long lastPermissionCheckNs;
+    private long lastHeartbeatMs;
 
     private final Runnable frameLoop = new Runnable() {
         @Override
@@ -40,6 +48,14 @@ public final class OverlayService extends Service {
             }
 
             long now = System.nanoTime();
+            if (now - lastPermissionCheckNs >= PERMISSION_CHECK_INTERVAL_NS) {
+                lastPermissionCheckNs = now;
+                if (!Settings.canDrawOverlays(OverlayService.this)) {
+                    stopForOverlayFailure();
+                    return;
+                }
+            }
+
             float dt = lastFrameNs == 0L ? 1f / 30f : (now - lastFrameNs) / 1_000_000_000f;
             lastFrameNs = now;
             engine.step(dt);
@@ -55,8 +71,14 @@ public final class OverlayService extends Service {
             try {
                 windowManager.updateViewLayout(flyView, flyParams);
                 syncSugarOverlay(s, width, height);
-            } catch (IllegalArgumentException ignored) {
+            } catch (RuntimeException ignored) {
+                stopForOverlayFailure();
                 return;
+            }
+
+            long wallClockMs = System.currentTimeMillis();
+            if (wallClockMs - lastHeartbeatMs >= HEARTBEAT_INTERVAL_MS) {
+                markOverlayAlive(wallClockMs);
             }
 
             handler.postDelayed(this, 33L);
@@ -81,22 +103,27 @@ public final class OverlayService extends Service {
             return START_NOT_STICKY;
         }
 
-        if (ACTION_FEED.equals(action)) {
+        if (ACTION_SET_NAME.equals(action)) {
+            engine.setDisplayName(intent == null ? null : intent.getStringExtra(EXTRA_DISPLAY_NAME));
+        } else if (ACTION_FEED.equals(action)) {
             engine.placeSugar();
         } else if (ACTION_POKE.equals(action)) {
             engine.registerTouchThreat();
         }
 
-        if (Settings.canDrawOverlays(this)) {
-            ensureOverlay();
+        if (!Settings.canDrawOverlays(this)) {
+            engine.persist();
+            markOverlayStopped();
+            stopSelf(startId);
+            return START_NOT_STICKY;
         }
 
-        return START_STICKY;
+        return ensureOverlay() ? START_STICKY : START_NOT_STICKY;
     }
 
-    private void ensureOverlay() {
+    private boolean ensureOverlay() {
         if (flyView != null) {
-            return;
+            return true;
         }
 
         int size = dp(82);
@@ -125,11 +152,22 @@ public final class OverlayService extends Service {
         flyParams.x = Math.round(s.x * width - size * 0.5f);
         flyParams.y = Math.round(s.y * height - size * 0.5f);
 
-        windowManager.addView(flyView, flyParams);
-        getSharedPreferences(FlybitEngine.PREFS, MODE_PRIVATE).edit().putBoolean("overlay_running", true).apply();
+        try {
+            windowManager.addView(flyView, flyParams);
+        } catch (RuntimeException ignored) {
+            flyView = null;
+            flyParams = null;
+            stopForOverlayFailure();
+            return false;
+        }
+
+        long nowMs = System.currentTimeMillis();
+        markOverlayAlive(nowMs);
         lastFrameNs = System.nanoTime();
+        lastPermissionCheckNs = lastFrameNs;
         handler.removeCallbacks(frameLoop);
         handler.post(frameLoop);
+        return true;
     }
 
     private void syncSugarOverlay(FlybitEngine.Snapshot s, int width, int height) {
@@ -163,6 +201,30 @@ public final class OverlayService extends Service {
             sugarView = null;
             sugarParams = null;
         }
+    }
+
+    private void markOverlayAlive(long nowMs) {
+        lastHeartbeatMs = nowMs;
+        getSharedPreferences(FlybitEngine.PREFS, MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_OVERLAY_RUNNING, true)
+                .putLong(PREF_OVERLAY_HEARTBEAT_MS, nowMs)
+                .apply();
+    }
+
+    private void markOverlayStopped() {
+        lastHeartbeatMs = 0L;
+        getSharedPreferences(FlybitEngine.PREFS, MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_OVERLAY_RUNNING, false)
+                .putLong(PREF_OVERLAY_HEARTBEAT_MS, 0L)
+                .apply();
+    }
+
+    private void stopForOverlayFailure() {
+        handler.removeCallbacks(frameLoop);
+        markOverlayStopped();
+        stopSelf();
     }
 
     private Notification buildNotification() {
@@ -220,7 +282,7 @@ public final class OverlayService extends Service {
         }
         flyView = null;
         sugarView = null;
-        getSharedPreferences(FlybitEngine.PREFS, MODE_PRIVATE).edit().putBoolean("overlay_running", false).apply();
+        markOverlayStopped();
         stopForeground(STOP_FOREGROUND_REMOVE);
         super.onDestroy();
     }
