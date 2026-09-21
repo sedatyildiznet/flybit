@@ -722,7 +722,7 @@ Flybit does not currently claim:
 
 Use the latest stable release:
 
-**[Flybit v0.5.0](https://github.com/sedatyildiznet/flybit/releases/tag/v0.5.0)**
+**[Flybit v0.6.1](https://github.com/sedatyildiznet/flybit/releases/tag/v0.6.1)**
 
 The Windows package is produced by GitHub Actions as:
 
@@ -953,7 +953,7 @@ See **[LICENSE](LICENSE)**.
 
 ## Android APK
 
-Flybit v0.6.0 adds a native Android companion with an optional system overlay, persistent organism state, mobile care controls and Overview / Brain / Care / Logs telemetry.
+Flybit v0.6.1 includes the native Android companion with an optional system overlay, persistent organism state, mobile care controls and Overview / Brain / Care / Logs telemetry. The patch hardens overlay lifecycle recovery, persistent identity updates and mobile flight bouts.
 
 The Android target preserves the Flybit pipeline while keeping its evidence boundary explicit: it uses a **MODELED MOBILE CNS** and does not claim to execute the Python/Numba MaleCNS connectome on-device.
 
