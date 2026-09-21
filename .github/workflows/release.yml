@@ -139,3 +139,52 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.publish.outputs.tag }}
         run: gh release upload "$env:TAG" Flybit-Windows-x64.zip --clobber
+
+
+  build-android-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build installable Android APK
+        shell: bash
+        run: |
+          gradle -p android clean assembleDebug
+          cp android/app/build/outputs/apk/debug/app-debug.apk Flybit-Android.apk
+
+      - name: Upload Android workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Flybit-Android-${{ needs.publish.outputs.version }}
+          path: Flybit-Android.apk
+          if-no-files-found: error
+
+      - name: Attach APK to GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.publish.outputs.tag }}
+        run: gh release upload "$TAG" Flybit-Android.apk --clobber
