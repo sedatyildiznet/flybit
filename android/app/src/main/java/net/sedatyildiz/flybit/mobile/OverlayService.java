@@ -64,8 +64,8 @@ public final class OverlayService extends Service {
             int width = getResources().getDisplayMetrics().widthPixels;
             int height = getResources().getDisplayMetrics().heightPixels;
 
-            flyParams.x = Math.round(s.x * width - flyParams.width * 0.5f);
-            flyParams.y = Math.round(s.y * height - flyParams.height * 0.5f);
+            flyParams.x = worldCenterX(s.x, width) - flyParams.width / 2;
+            flyParams.y = worldCenterY(s.y, height) - flyParams.height / 2;
             flyView.setMotion(s.heading, s.behavior);
 
             try {
@@ -149,8 +149,8 @@ public final class OverlayService extends Service {
         FlybitEngine.Snapshot s = engine.snapshot();
         int width = getResources().getDisplayMetrics().widthPixels;
         int height = getResources().getDisplayMetrics().heightPixels;
-        flyParams.x = Math.round(s.x * width - size * 0.5f);
-        flyParams.y = Math.round(s.y * height - size * 0.5f);
+        flyParams.x = worldCenterX(s.x, width) - size / 2;
+        flyParams.y = worldCenterY(s.y, height) - size / 2;
 
         try {
             windowManager.addView(flyView, flyParams);
@@ -185,12 +185,12 @@ public final class OverlayService extends Service {
                         PixelFormat.TRANSLUCENT
                 );
                 sugarParams.gravity = Gravity.TOP | Gravity.START;
-                sugarParams.x = Math.round(s.foodX * width - size * 0.5f);
-                sugarParams.y = Math.round(s.foodY * height - size * 0.5f);
+                sugarParams.x = worldCenterX(s.foodX, width) - size / 2;
+                sugarParams.y = worldCenterY(s.foodY, height) - size / 2;
                 windowManager.addView(sugarView, sugarParams);
             } else {
-                sugarParams.x = Math.round(s.foodX * width - sugarParams.width * 0.5f);
-                sugarParams.y = Math.round(s.foodY * height - sugarParams.height * 0.5f);
+                sugarParams.x = worldCenterX(s.foodX, width) - sugarParams.width / 2;
+                sugarParams.y = worldCenterY(s.foodY, height) - sugarParams.height / 2;
                 windowManager.updateViewLayout(sugarView, sugarParams);
             }
         } else if (sugarView != null) {
@@ -254,6 +254,22 @@ public final class OverlayService extends Service {
         );
         channel.setDescription("Keeps the screen organism alive while the overlay is enabled.");
         manager.createNotificationChannel(channel);
+    }
+
+    private int worldCenterX(float normalized, int width) {
+        int halfBody = flyParams == null ? dp(41) : flyParams.width / 2;
+        int usable = Math.max(0, width - halfBody * 2);
+        return halfBody + Math.round(clamp01(normalized) * usable);
+    }
+
+    private int worldCenterY(float normalized, int height) {
+        int halfBody = flyParams == null ? dp(41) : flyParams.height / 2;
+        int usable = Math.max(0, height - halfBody * 2);
+        return halfBody + Math.round(clamp01(normalized) * usable);
+    }
+
+    private static float clamp01(float value) {
+        return Math.max(0f, Math.min(1f, value));
     }
 
     private int dp(int value) {
