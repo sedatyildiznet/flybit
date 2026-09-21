@@ -1,0 +1,28 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'net.sedatyildiz.flybit.mobile'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "net.sedatyildiz.flybit"
+        minSdk 26
+        targetSdk 35
+        versionCode 600
+        versionName "0.6.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
